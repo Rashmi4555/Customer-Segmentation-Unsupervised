@@ -39,8 +39,8 @@ This project uses the Online Retail dataset containing transactional data of cus
 
 
 ## ▶️ How to Run Project
-pip install -r requirements.txt
-python main.py
+- pip install -r requirements.txt
+- python main.py
 
 
 ## 🧠 main.py Functionality
