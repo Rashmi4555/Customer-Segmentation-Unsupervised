@@ -1,141 +1,146 @@
 """
-DBSCAN Clustering Implementation
+DBSCAN clustering implementation
 """
+
 import numpy as np
+import pandas as pd
 from sklearn.cluster import DBSCAN
 from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics import silhouette_score
 import matplotlib.pyplot as plt
-import warnings
-warnings.filterwarnings('ignore')
+import logging
+from pathlib import Path
 
 class DBSCANClustering:
-    """DBSCAN clustering implementation with automatic parameter tuning"""
+    """DBSCAN clustering with automatic parameter tuning"""
     
-    def __init__(self, min_samples_range=(3, 10)):
-        self.min_samples_range = min_samples_range
+    def __init__(self, config):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
         self.model = None
-        self.optimal_eps = None
-        self.optimal_min_samples = None
-        self.n_clusters = None
+        self.best_params = None
+        
+    def find_optimal_params(self, X):
+        """Find optimal epsilon and min_samples parameters"""
+        self.logger.info("Finding optimal DBSCAN parameters")
+        
+        eps_range = self.config['clustering']['dbscan']['eps_range']
+        min_samples_range = self.config['clustering']['dbscan']['min_samples_range']
+        
+        results = []
+        
+        for eps in eps_range:
+            for min_samples in min_samples_range:
+                dbscan = DBSCAN(eps=eps, min_samples=min_samples)
+                labels = dbscan.fit_predict(X)
+                
+                # Count clusters (excluding noise)
+                n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+                n_noise = list(labels).count(-1)
+                
+                # Calculate silhouette score (excluding noise)
+                if n_clusters > 1:
+                    # Filter out noise points for silhouette calculation
+                    non_noise_mask = labels != -1
+                    if sum(non_noise_mask) > 1:
+                        try:
+                            silhouette = silhouette_score(X[non_noise_mask], labels[non_noise_mask])
+                        except:
+                            silhouette = -1
+                    else:
+                        silhouette = -1
+                else:
+                    silhouette = -1
+                
+                results.append({
+                    'eps': eps,
+                    'min_samples': min_samples,
+                    'n_clusters': n_clusters,
+                    'n_noise': n_noise,
+                    'noise_ratio': n_noise / len(X),
+                    'silhouette': silhouette
+                })
+        
+        results_df = pd.DataFrame(results)
+        
+        # Filter results with reasonable clusters
+        valid_results = results_df[
+            (results_df['n_clusters'] >= 2) & 
+            (results_df['n_clusters'] <= 10) &
+            (results_df['noise_ratio'] < 0.3)  # Less than 30% noise
+        ]
+        
+        if len(valid_results) > 0:
+            # Select best based on silhouette score
+            best_idx = valid_results['silhouette'].idxmax()
+            self.best_params = {
+                'eps': valid_results.loc[best_idx, 'eps'],
+                'min_samples': int(valid_results.loc[best_idx, 'min_samples'])
+            }
+        else:
+            # Use default parameters
+            self.best_params = {'eps': 0.5, 'min_samples': 5}
+            self.logger.warning("No valid parameters found. Using defaults.")
+        
+        self.logger.info(f"Optimal parameters: {self.best_params}")
+        
+        # Plot k-distance graph for epsilon selection
+        self._plot_k_distance(X)
+        
+        return self.best_params
     
-    def find_optimal_eps(self, X, k=4):
-        """Find optimal epsilon using k-distance graph"""
-        # Calculate k-distance
-        neighbors = NearestNeighbors(n_neighbors=k)
-        neighbors_fit = neighbors.fit(X)
-        distances, indices = neighbors_fit.kneighbors(X)
+    def _plot_k_distance(self, X, k=4):
+        """Plot k-distance graph for epsilon selection"""
+        neigh = NearestNeighbors(n_neighbors=k)
+        neighbors = neigh.fit(X)
+        distances, indices = neighbors.kneighbors(X)
         
         # Sort distances
-        k_distances = np.sort(distances[:, k-1])
-        
-        # Find elbow point
-        diffs = np.diff(k_distances)
-        diffs2 = np.diff(diffs)
-        elbow_point = np.argmax(diffs2)
-        
-        self.optimal_eps = k_distances[elbow_point]
-        self.k_distances = k_distances
-        
-        return self.optimal_eps
-    
-    def tune_parameters(self, X):
-        """Tune DBSCAN parameters"""
-        eps_values = []
-        min_samples_values = []
-        n_clusters_values = []
-        silhouette_values = []
-        
-        # Find optimal eps first
-        optimal_eps = self.find_optimal_eps(X)
-        
-        # Try different min_samples values
-        for min_samples in range(self.min_samples_range[0], self.min_samples_range[1] + 1):
-            dbscan = DBSCAN(eps=optimal_eps, min_samples=min_samples)
-            labels = dbscan.fit_predict(X)
-            
-            # Count clusters (excluding noise = -1)
-            n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-            
-            if n_clusters > 1:
-                # Calculate silhouette (excluding noise points)
-                valid_mask = labels != -1
-                if valid_mask.sum() > 0:
-                    sil_score = silhouette_score(X[valid_mask], labels[valid_mask])
-                else:
-                    sil_score = -1
-            else:
-                sil_score = -1
-            
-            eps_values.append(optimal_eps)
-            min_samples_values.append(min_samples)
-            n_clusters_values.append(n_clusters)
-            silhouette_values.append(sil_score)
-        
-        # Find best parameters
-        valid_indices = [i for i, s in enumerate(silhouette_values) if s > 0]
-        
-        if valid_indices:
-            best_idx = valid_indices[np.argmax([silhouette_values[i] for i in valid_indices])]
-            self.optimal_eps = eps_values[best_idx]
-            self.optimal_min_samples = min_samples_values[best_idx]
-            self.n_clusters = n_clusters_values[best_idx]
-        else:
-            # Default to reasonable values
-            self.optimal_eps = optimal_eps
-            self.optimal_min_samples = self.min_samples_range[0]
-            self.n_clusters = 1
-        
-        return self.optimal_eps, self.optimal_min_samples
-    
-    def plot_k_distance(self, X, k=4):
-        """Plot k-distance graph"""
-        if not hasattr(self, 'k_distances'):
-            self.find_optimal_eps(X, k)
+        k_distances = np.sort(distances[:, k-1], axis=0)
         
         plt.figure(figsize=(10, 6))
-        plt.plot(np.arange(len(self.k_distances)), self.k_distances)
-        plt.axhline(y=self.optimal_eps, color='r', linestyle='--', 
-                   label=f'Optimal eps = {self.optimal_eps:.3f}')
+        plt.plot(k_distances)
+        plt.axhline(y=self.best_params['eps'], color='r', linestyle='--', 
+                   label=f'Selected eps = {self.best_params["eps"]}')
         plt.xlabel('Points sorted by distance')
         plt.ylabel(f'{k}-distance')
-        plt.title('k-Distance Graph for DBSCAN')
+        plt.title('k-Distance Graph for Epsilon Selection')
         plt.legend()
-        plt.grid(True, alpha=0.3)
+        plt.grid(True)
         
-        return plt.gcf()
+        # Save plot
+        output_dir = Path('results/cluster_plots')
+        output_dir.mkdir(parents=True, exist_ok=True)
+        plt.savefig(output_dir / 'dbscan_k_distance.png', dpi=300, bbox_inches='tight')
+        plt.close()
     
     def fit_predict(self, X):
         """Fit DBSCAN and predict clusters"""
-        # Tune parameters
-        if self.optimal_eps is None:
-            self.tune_parameters(X)
+        self.logger.info("Fitting DBSCAN clustering")
         
-        # Train model
+        # Find optimal parameters if not already found
+        if self.best_params is None:
+            self.find_optimal_params(X)
+        
+        # Train final model
         self.model = DBSCAN(
-            eps=self.optimal_eps,
-            min_samples=self.optimal_min_samples
+            eps=self.best_params['eps'],
+            min_samples=self.best_params['min_samples']
         )
         
         labels = self.model.fit_predict(X)
         
-        # Count clusters excluding noise
-        unique_labels = set(labels)
-        self.n_clusters = len(unique_labels) - (1 if -1 in unique_labels else 0)
+        # Analyze results
+        n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+        n_noise = list(labels).count(-1)
         
-        # Calculate noise percentage
-        noise_points = (labels == -1).sum()
-        self.noise_percentage = (noise_points / len(labels)) * 100
+        self.logger.info(f"DBSCAN complete. Found {n_clusters} clusters, "
+                       f"{n_noise} noise points ({n_noise/len(X)*100:.1f}%)")
         
-        print(f"  DBSCAN: {self.n_clusters} clusters, {self.noise_percentage:.1f}% noise")
-        
-        return labels, self.n_clusters
-    
-    def get_model_params(self):
-        """Get model parameters"""
         return {
-            'eps': self.optimal_eps,
-            'min_samples': self.optimal_min_samples,
-            'n_clusters': self.n_clusters,
-            'noise_percentage': getattr(self, 'noise_percentage', 0)
+            'labels': labels,
+            'model': self.model,
+            'n_clusters': n_clusters,
+            'n_noise': n_noise,
+            'params': self.best_params
         }

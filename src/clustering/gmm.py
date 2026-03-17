@@ -1,134 +1,157 @@
 """
-Gaussian Mixture Model Implementation
+Gaussian Mixture Model clustering implementation
 """
+
 import numpy as np
+import pandas as pd
 from sklearn.mixture import GaussianMixture
 from sklearn.metrics import silhouette_score, davies_bouldin_score
-import warnings
-warnings.filterwarnings('ignore')
+from sklearn.model_selection import cross_val_score
+import matplotlib.pyplot as plt
+import logging
+from pathlib import Path
 
 class GMMClustering:
-    """Gaussian Mixture Model implementation with BIC/AIC selection"""
+    """Gaussian Mixture Model clustering with BIC/AIC selection"""
     
-    def __init__(self, max_components=10, random_state=42):
-        self.max_components = max_components
-        self.random_state = random_state
+    def __init__(self, config):
+        self.config = config
+        self.logger = logging.getLogger(__name__)
         self.model = None
-        self.optimal_components = None
-        self.bic_scores = []
-        self.aic_scores = []
-    
+        self.best_n_components = None
+        
     def find_optimal_components(self, X):
         """Find optimal number of components using BIC and AIC"""
+        self.logger.info("Finding optimal number of components for GMM")
+        
+        n_components_range = self.config['clustering']['gmm']['n_components_range']
+        covariance_type = self.config['clustering']['gmm']['covariance_type']
+        
         bic_scores = []
         aic_scores = []
         silhouette_scores = []
         
-        for n in range(1, self.max_components + 1):
+        for n_components in n_components_range:
             gmm = GaussianMixture(
-                n_components=n,
-                random_state=self.random_state,
-                covariance_type='full'
+                n_components=n_components,
+                covariance_type=covariance_type,
+                max_iter=self.config['clustering']['gmm']['max_iter'],
+                n_init=self.config['clustering']['gmm']['n_init'],
+                random_state=42
             )
-            gmm.fit(X)
             
+            gmm.fit(X)
+            labels = gmm.predict(X)
+            
+            # Calculate scores
             bic_scores.append(gmm.bic(X))
             aic_scores.append(gmm.aic(X))
             
-            # Calculate silhouette score
-            labels = gmm.predict(X)
-            if len(np.unique(labels)) > 1:
-                sil_score = silhouette_score(X, labels)
-                silhouette_scores.append(sil_score)
+            if n_components > 1:
+                silhouette = silhouette_score(X, labels)
             else:
-                silhouette_scores.append(0)
+                silhouette = np.nan
+            
+            silhouette_scores.append(silhouette)
+            
+            self.logger.info(f"Components={n_components}: "
+                           f"BIC={gmm.bic(X):.2f}, AIC={gmm.aic(X):.2f}, "
+                           f"Silhouette={silhouette:.3f}")
         
-        # Find elbow in BIC (lower is better)
-        bic_diffs = np.diff(bic_scores)
-        bic_elbow = np.argmax(np.diff(bic_diffs)) + 2
+        # Find optimal number of components
+        # BIC and AIC: lower is better
+        best_bic_idx = np.argmin(bic_scores)
+        best_aic_idx = np.argmin(aic_scores)
         
-        # Find best silhouette score
-        best_silhouette = np.argmax(silhouette_scores) + 1
+        # Silhouette: higher is better
+        valid_silhouette = [s for s in silhouette_scores if not np.isnan(s)]
+        if valid_silhouette:
+            best_silhouette_idx = np.argmax(valid_silhouette)
+        else:
+            best_silhouette_idx = best_bic_idx
         
-        # Choose optimal components (prioritize silhouette)
-        self.optimal_components = best_silhouette
+        # Combine decisions (prefer silhouette when available)
+        if len(valid_silhouette) > 0:
+            self.best_n_components = n_components_range[best_silhouette_idx]
+        else:
+            self.best_n_components = n_components_range[best_bic_idx]
         
-        self.bic_scores = bic_scores
-        self.aic_scores = aic_scores
-        self.silhouette_scores = silhouette_scores
-        self.bic_elbow = bic_elbow
-        self.best_silhouette = best_silhouette
+        self.logger.info(f"Optimal components selected: {self.best_n_components}")
         
-        return self.optimal_components
+        # Plot selection curves
+        self._plot_selection_curves(n_components_range, bic_scores, 
+                                   aic_scores, silhouette_scores)
+        
+        return self.best_n_components
     
-    def plot_information_criteria(self):
-        """Plot BIC and AIC scores"""
-        if not self.bic_scores:
-            return None
+    def _plot_selection_curves(self, n_components_range, bic_scores, 
+                              aic_scores, silhouette_scores):
+        """Plot BIC, AIC, and silhouette scores"""
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
         
-        import matplotlib.pyplot as plt
+        # BIC plot
+        axes[0].plot(n_components_range, bic_scores, 'bo-')
+        axes[0].axvline(x=self.best_n_components, color='r', linestyle='--', alpha=0.5)
+        axes[0].set_xlabel('Number of Components')
+        axes[0].set_ylabel('BIC Score')
+        axes[0].set_title('BIC (Lower is better)')
+        axes[0].grid(True)
         
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+        # AIC plot
+        axes[1].plot(n_components_range, aic_scores, 'go-')
+        axes[1].axvline(x=self.best_n_components, color='r', linestyle='--', alpha=0.5)
+        axes[1].set_xlabel('Number of Components')
+        axes[1].set_ylabel('AIC Score')
+        axes[1].set_title('AIC (Lower is better)')
+        axes[1].grid(True)
         
-        # BIC Plot
-        ax1.plot(range(1, len(self.bic_scores) + 1), self.bic_scores, 
-                marker='o', color='blue', label='BIC')
-        ax1.axvline(x=self.bic_elbow, color='r', linestyle='--',
-                   label=f'BIC Elbow: K={self.bic_elbow}')
-        ax1.set_xlabel('Number of Components')
-        ax1.set_ylabel('BIC Score')
-        ax1.set_title('Bayesian Information Criterion (BIC)')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-        
-        # AIC Plot
-        ax2.plot(range(1, len(self.aic_scores) + 1), self.aic_scores,
-                marker='o', color='green', label='AIC')
-        ax2.axvline(x=self.optimal_components, color='r', linestyle='--',
-                   label=f'Optimal: K={self.optimal_components}')
-        ax2.set_xlabel('Number of Components')
-        ax2.set_ylabel('AIC Score')
-        ax2.set_title('Akaike Information Criterion (AIC)')
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
+        # Silhouette plot
+        axes[2].plot(n_components_range, silhouette_scores, 'ro-')
+        axes[2].axvline(x=self.best_n_components, color='r', linestyle='--', alpha=0.5)
+        axes[2].set_xlabel('Number of Components')
+        axes[2].set_ylabel('Silhouette Score')
+        axes[2].set_title('Silhouette Score (Higher is better)')
+        axes[2].grid(True)
         
         plt.tight_layout()
-        return fig
+        
+        # Save plot
+        output_dir = Path('results/cluster_plots')
+        output_dir.mkdir(parents=True, exist_ok=True)
+        plt.savefig(output_dir / 'gmm_component_selection.png', dpi=300, bbox_inches='tight')
+        plt.close()
     
     def fit_predict(self, X):
         """Fit GMM and predict clusters"""
-        # Find optimal components
-        if self.optimal_components is None:
+        self.logger.info("Fitting Gaussian Mixture Model")
+        
+        # Find optimal number of components if not already found
+        if self.best_n_components is None:
             self.find_optimal_components(X)
         
-        # Train model
+        # Train final model
         self.model = GaussianMixture(
-            n_components=self.optimal_components,
-            random_state=self.random_state,
-            covariance_type='full'
+            n_components=self.best_n_components,
+            covariance_type=self.config['clustering']['gmm']['covariance_type'],
+            max_iter=self.config['clustering']['gmm']['max_iter'],
+            n_init=self.config['clustering']['gmm']['n_init'],
+            random_state=42
         )
         
-        self.model.fit(X)
-        labels = self.model.predict(X)
+        labels = self.model.fit_predict(X)
         probabilities = self.model.predict_proba(X)
         
-        self.labels = labels
-        self.probabilities = probabilities
+        # Calculate cluster responsibilities
+        responsibilities = self.model.predict_proba(X)
         
-        return labels, self.optimal_components
-    
-    def get_probability_matrix(self):
-        """Get cluster membership probabilities"""
-        if hasattr(self, 'probabilities'):
-            return self.probabilities
-        return None
-    
-    def get_model_params(self):
-        """Get model parameters"""
+        self.logger.info(f"GMM complete. Found {self.best_n_components} components")
+        
         return {
-            'n_components': self.optimal_components,
-            'bic_scores': self.bic_scores,
-            'aic_scores': self.aic_scores,
-            'silhouette_scores': self.silhouette_scores,
-            'converged': self.model.converged_ if self.model else None
+            'labels': labels,
+            'model': self.model,
+            'proba': probabilities,
+            'responsibilities': responsibilities,
+            'n_components': self.best_n_components,
+            'bic': self.model.bic(X),
+            'aic': self.model.aic(X)
         }

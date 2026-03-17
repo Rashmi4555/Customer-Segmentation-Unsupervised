@@ -1,177 +1,259 @@
 """
-Clustering evaluation module
+Evaluation module for clustering algorithms
 """
 import numpy as np
-from sklearn.metrics import (
-    silhouette_score,
-    davies_bouldin_score,
-    calinski_harabasz_score
-)
-from sklearn.preprocessing import StandardScaler
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
+from pathlib import Path
+import json
 import warnings
 warnings.filterwarnings('ignore')
 
 class ClusterEvaluator:
     """Evaluates clustering performance using multiple metrics"""
     
-    def __init__(self):
+    def __init__(self, config=None):
+        """
+        Initialize ClusterEvaluator with optional configuration
+        
+        Args:
+            config (dict, optional): Configuration dictionary
+        """
+        self.config = config if config else {}
         self.metrics_history = {}
+        self.results_dir = Path('results/metrics')
+        self.results_dir.mkdir(parents=True, exist_ok=True)
     
-    def evaluate(self, X, labels, n_clusters):
-        """Evaluate clustering performance"""
-        if n_clusters < 2:
+    def evaluate(self, X, labels, proba=None):
+        """
+        Evaluate clustering performance
+        
+        Args:
+            X: Feature matrix
+            labels: Cluster labels
+            proba: Cluster probabilities (for GMM)
+        
+        Returns:
+            dict: Evaluation metrics
+        """
+        # Handle noise points (for DBSCAN)
+        if -1 in labels:
+            mask = labels != -1
+            X_valid = X[mask]
+            labels_valid = labels[mask]
+            noise_points = (labels == -1).sum()
+            noise_percentage = (noise_points / len(labels)) * 100
+        else:
+            X_valid = X
+            labels_valid = labels
+            noise_percentage = 0
+        
+        n_clusters = len(np.unique(labels_valid))
+        
+        # If only one cluster or invalid, return default values
+        if n_clusters < 2 or len(X_valid) < 2:
             return {
+                'n_clusters': n_clusters,
                 'silhouette': -1,
                 'davies_bouldin': float('inf'),
                 'calinski_harabasz': 0,
-                'n_clusters': n_clusters
+                'noise_percentage': noise_percentage,
+                'cluster_sizes': self._get_cluster_sizes(labels)
             }
-        
-        # Filter out noise points for DBSCAN
-        valid_mask = labels != -1
-        
-        if valid_mask.sum() < 2:
-            return {
-                'silhouette': -1,
-                'davies_bouldin': float('inf'),
-                'calinski_harabasz': 0,
-                'n_clusters': n_clusters
-            }
-        
-        X_valid = X[valid_mask] if -1 in labels else X
-        labels_valid = labels[valid_mask] if -1 in labels else labels
         
         # Calculate metrics
         try:
             silhouette = silhouette_score(X_valid, labels_valid)
-        except:
+        except Exception as e:
+            print(f"    Warning: Silhouette calculation failed: {e}")
             silhouette = -1
         
         try:
             davies_bouldin = davies_bouldin_score(X_valid, labels_valid)
-        except:
+        except Exception as e:
+            print(f"    Warning: Davies-Bouldin calculation failed: {e}")
             davies_bouldin = float('inf')
         
         try:
-            calinski_harabasz = calinski_harabasz_score(X_valid, labels_valid)
-        except:
-            calinski_harabasz = 0
+            calinski = calinski_harabasz_score(X_valid, labels_valid)
+        except Exception as e:
+            print(f"    Warning: Calinski-Harabasz calculation failed: {e}")
+            calinski = 0
         
-        # Calculate cluster statistics
-        cluster_stats = self._calculate_cluster_statistics(X, labels, n_clusters)
+        # Calculate additional metrics
+        cluster_sizes = self._get_cluster_sizes(labels)
+        
+        # Calculate cluster separation
+        separation = self._calculate_cluster_separation(X_valid, labels_valid)
         
         results = {
+            'n_clusters': n_clusters,
             'silhouette': silhouette,
             'davies_bouldin': davies_bouldin,
-            'calinski_harabasz': calinski_harabasz,
-            'n_clusters': n_clusters,
-            'cluster_stats': cluster_stats,
-            'noise_percentage': ((labels == -1).sum() / len(labels) * 100) if -1 in labels else 0
+            'calinski_harabasz': calinski,
+            'noise_percentage': noise_percentage,
+            'cluster_sizes': cluster_sizes,
+            'separation': separation
         }
         
         return results
     
-    def _calculate_cluster_statistics(self, X, labels, n_clusters):
-        """Calculate statistics for each cluster"""
-        stats = {}
-        
-        for cluster_id in range(n_clusters):
-            if cluster_id == -1:  # Skip noise for DBSCAN
-                continue
-                
-            cluster_mask = labels == cluster_id
-            cluster_size = cluster_mask.sum()
-            
-            if cluster_size > 0:
-                cluster_data = X[cluster_mask]
-                
-                stats[cluster_id] = {
-                    'size': cluster_size,
-                    'percentage': (cluster_size / len(X)) * 100,
-                    'mean_values': cluster_data.mean(axis=0).tolist(),
-                    'std_values': cluster_data.std(axis=0).tolist(),
-                    'min_values': cluster_data.min(axis=0).tolist(),
-                    'max_values': cluster_data.max(axis=0).tolist()
-                }
-        
-        return stats
+    def _get_cluster_sizes(self, labels):
+        """Get size of each cluster"""
+        unique, counts = np.unique(labels, return_counts=True)
+        return dict(zip(unique.astype(str), counts.tolist()))
     
-    def compare_algorithms(self, results_dict):
-        """Compare multiple clustering algorithms"""
-        comparison = {}
+    def _calculate_cluster_separation(self, X, labels):
+        """Calculate average distance between cluster centers"""
+        unique_labels = np.unique(labels)
+        if len(unique_labels) < 2:
+            return 0
         
-        for algo_name, result in results_dict.items():
-            comparison[algo_name] = {
-                'n_clusters': result['n_clusters'],
-                'silhouette': result['scores']['silhouette'],
-                'davies_bouldin': result['scores']['davies_bouldin'],
-                'calinski_harabasz': result['scores']['calinski_harabasz'],
-                'noise_percentage': result['scores'].get('noise_percentage', 0)
-            }
+        centers = []
+        for label in unique_labels:
+            mask = labels == label
+            centers.append(X[mask].mean(axis=0))
         
-        # Create comparison DataFrame
-        df_comparison = pd.DataFrame(comparison).T
+        # Calculate pairwise distances
+        distances = []
+        for i in range(len(centers)):
+            for j in range(i+1, len(centers)):
+                dist = np.linalg.norm(centers[i] - centers[j])
+                distances.append(dist)
         
-        # Rank algorithms
-        df_comparison['silhouette_rank'] = df_comparison['silhouette'].rank(ascending=False)
-        df_comparison['davies_bouldin_rank'] = df_comparison['davies_bouldin'].rank(ascending=True)
-        df_comparison['calinski_harabasz_rank'] = df_comparison['calinski_harabasz'].rank(ascending=False)
-        
-        # Overall rank (average of individual ranks)
-        df_comparison['overall_rank'] = df_comparison[
-            ['silhouette_rank', 'davies_bouldin_rank', 'calinski_harabasz_rank']
-        ].mean(axis=1)
-        
-        df_comparison = df_comparison.sort_values('overall_rank')
-        
-        return df_comparison
+        return np.mean(distances) if distances else 0
     
-    def generate_report(self, results_dict, algorithm_names):
-        """Generate comprehensive evaluation report"""
-        report = {
-            'summary': {},
-            'detailed_results': {},
-            'recommendations': []
-        }
+    def save_results(self, metrics, algorithm_name):
+        """
+        Save evaluation results to JSON file
         
-        # Compare algorithms
-        comparison_df = self.compare_algorithms(results_dict)
+        Args:
+            metrics: Dictionary of evaluation metrics
+            algorithm_name: Name of the algorithm
+        """
+        # Create a copy to avoid modifying original
+        results = metrics.copy()
         
-        # Best algorithm
-        best_algo = comparison_df.index[0]
+        # Convert numpy types to Python types
+        results = self._convert_numpy_types(results)
         
-        report['summary'] = {
-            'best_algorithm': best_algo,
-            'best_n_clusters': results_dict[best_algo]['n_clusters'],
-            'best_silhouette': results_dict[best_algo]['scores']['silhouette'],
-            'algorithm_ranking': comparison_df['overall_rank'].to_dict()
-        }
+        # Add timestamp
+        from datetime import datetime
+        results['timestamp'] = datetime.now().isoformat()
+        results['algorithm'] = algorithm_name
         
-        # Detailed results
-        for algo_name in algorithm_names:
-            if algo_name in results_dict:
-                report['detailed_results'][algo_name] = results_dict[algo_name]['scores']
+        # Save to file
+        filename = self.results_dir / f'{algorithm_name}_metrics.json'
+        with open(filename, 'w') as f:
+            json.dump(results, f, indent=4)
         
-        # Recommendations
-        best_result = results_dict[best_algo]
-        n_clusters = best_result['n_clusters']
+        print(f"    ✅ Evaluation results saved to {filename}")
         
-        if best_result['scores']['silhouette'] > 0.5:
-            report['recommendations'].append(
-                f"✅ Excellent clustering (Silhouette: {best_result['scores']['silhouette']:.3f})"
-            )
-        elif best_result['scores']['silhouette'] > 0.25:
-            report['recommendations'].append(
-                f"⚠️ Fair clustering (Silhouette: {best_result['scores']['silhouette']:.3f}) - Consider feature engineering"
-            )
+        # Store in history
+        self.metrics_history[algorithm_name] = results
+        
+        return filename
+    
+    def _convert_numpy_types(self, obj):
+        """Convert numpy types to Python native types for JSON serialization"""
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {key: self._convert_numpy_types(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_numpy_types(item) for item in obj]
         else:
-            report['recommendations'].append(
-                f"❌ Poor clustering (Silhouette: {best_result['scores']['silhouette']:.3f}) - Algorithm or data may not be suitable"
-            )
+            return obj
+    
+    def visualize_clusters(self, X, labels, algorithm_name):
+        """
+        Create visualization of clusters
         
-        report['recommendations'].append(
-            f"Optimal number of clusters: {n_clusters}"
-        )
+        Args:
+            X: Feature matrix (DataFrame or numpy array)
+            labels: Cluster labels
+            algorithm_name: Name of the algorithm
+        """
+        # Check if X is DataFrame or numpy array
+        if hasattr(X, 'values'):  # It's a pandas DataFrame
+            X_array = X.values
+        else:  # It's already a numpy array
+            X_array = X
         
-        return report, comparison_df
+        # Use first two dimensions for visualization
+        if X_array.shape[1] >= 2:
+            X_vis = X_array[:, :2]
+        else:
+            print(f"    Warning: Cannot visualize {algorithm_name} - insufficient dimensions")
+            return
+        
+        plt.figure(figsize=(12, 8))
+        
+        # Handle noise points
+        unique_labels = np.unique(labels)
+        colors = plt.cm.tab20(np.linspace(0, 1, len(unique_labels)))
+        
+        for i, label in enumerate(unique_labels):
+            mask = labels == label
+            if label == -1:
+                # Noise points
+                plt.scatter(X_vis[mask, 0], X_vis[mask, 1], 
+                           c='black', marker='x', s=30, alpha=0.6, label='Noise')
+            else:
+                plt.scatter(X_vis[mask, 0], X_vis[mask, 1], 
+                           c=[colors[i]], s=50, alpha=0.7, edgecolor='black', linewidth=0.5,
+                           label=f'Cluster {label}')
+        
+        plt.xlabel('Component 1')
+        plt.ylabel('Component 2')
+        plt.title(f'{algorithm_name} Clustering Results')
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        
+        # Save plot
+        plots_dir = Path('results/cluster_plots')
+        plots_dir.mkdir(parents=True, exist_ok=True)
+        filename = plots_dir / f'{algorithm_name}_clusters.png'
+        plt.savefig(filename, dpi=150, bbox_inches='tight')
+        plt.close()
+        
+        print(f"    ✅ Visualization saved to {filename}")
+    
+    def compare_algorithms(self):
+        """
+        Compare all evaluated algorithms
+        
+        Returns:
+            DataFrame: Comparison of algorithms with metrics
+        """
+        if not self.metrics_history:
+            print("No algorithms have been evaluated yet")
+            return None
+        
+        comparison = []
+        for algo_name, metrics in self.metrics_history.items():
+            comparison.append({
+                'Algorithm': algo_name,
+                'Clusters': metrics['n_clusters'],
+                'Silhouette': metrics['silhouette'],
+                'Davies-Bouldin': metrics['davies_bouldin'],
+                'Calinski-Harabasz': metrics['calinski_harabasz'],
+                'Noise %': metrics.get('noise_percentage', 0)
+            })
+        
+        df = pd.DataFrame(comparison)
+        df = df.sort_values('Silhouette', ascending=False).reset_index(drop=True)
+        
+        # Save comparison
+        filename = self.results_dir / 'algorithm_comparison.csv'
+        df.to_csv(filename, index=False)
+        print(f"✅ Algorithm comparison saved to {filename}")
+        
+        return df

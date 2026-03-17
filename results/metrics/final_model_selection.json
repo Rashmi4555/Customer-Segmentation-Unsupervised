@@ -1,0 +1,8 @@
+{
+    "best_algorithm": "DBSCAN",
+    "n_clusters": 2,
+    "silhouette_score": 0.5512481523142287,
+    "davies_bouldin": 0.42202404691713385,
+    "quality_grade": "A",
+    "quality_score": 90
+}

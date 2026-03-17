@@ -1,0 +1,4 @@
+2026-02-19 11:30:23,537 - __main__ - INFO - Starting Customer Segmentation System
+2026-02-19 11:30:45,054 - src.clustering.kmeans - INFO - Fitting K-Means clustering
+2026-02-19 11:30:45,054 - src.clustering.kmeans - INFO - Finding optimal number of clusters
+2026-02-19 11:30:45,054 - __main__ - ERROR - Error in main execution: 'n_init'

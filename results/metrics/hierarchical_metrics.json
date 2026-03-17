@@ -1,0 +1,14 @@
+{
+    "n_clusters": 2,
+    "silhouette": 0.6549880828863368,
+    "davies_bouldin": 0.44670367386915566,
+    "calinski_harabasz": 16179.445310980702,
+    "noise_percentage": 0,
+    "cluster_sizes": {
+        "0": 4342,
+        "1": 1536
+    },
+    "separation": 3.757232952394496e+16,
+    "timestamp": "2026-02-19T11:56:18.945705",
+    "algorithm": "hierarchical"
+}

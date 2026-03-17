@@ -1,85 +1,121 @@
 """
-K-Means Clustering Implementation
+K-Means clustering implementation
 """
 import numpy as np
 from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score, davies_bouldin_score
-import warnings
-warnings.filterwarnings('ignore')
+from sklearn.metrics import silhouette_score
+import logging
+
+logger = logging.getLogger(__name__)
 
 class KMeansClustering:
-    """K-Means clustering implementation with automatic K selection"""
+    """K-Means clustering with automatic K selection"""
     
-    def __init__(self, max_clusters=10, random_state=42):
-        self.max_clusters = max_clusters
-        self.random_state = random_state
+    def __init__(self, config=None):
+        """
+        Initialize K-Means clustering
+        
+        Args:
+            config (dict): Configuration dictionary
+        """
+        self.config = config if config else {}
         self.model = None
         self.optimal_k = None
-        self.scores = {}
+        self.labels = None
+        
+        # Get configuration with defaults
+        kmeans_config = self.config.get('clustering', {}).get('kmeans', {})
+        self.max_clusters = kmeans_config.get('max_clusters', 10)
+        self.random_state = kmeans_config.get('random_state', 42)
+        self.n_init = kmeans_config.get('n_init', 10)
+        self.n_clusters_range = kmeans_config.get('n_clusters_range', list(range(2, 11)))
     
     def find_optimal_k(self, X):
-        """Find optimal number of clusters using elbow method and silhouette"""
-        wcss = []  # Within-cluster sum of squares
+        """
+        Find optimal number of clusters using silhouette score
+        
+        Args:
+            X: Feature matrix
+            
+        Returns:
+            int: Optimal number of clusters
+        """
+        logger.info("Finding optimal number of clusters")
+        
         silhouette_scores = []
         
-        for k in range(2, self.max_clusters + 1):
-            kmeans = KMeans(n_clusters=k, random_state=self.random_state, n_init=10)
-            kmeans.fit(X)
-            wcss.append(kmeans.inertia_)
+        for k in self.n_clusters_range:
+            logger.debug(f"Testing K={k}")
+            kmeans = KMeans(
+                n_clusters=k, 
+                random_state=self.random_state,
+                n_init=self.n_init
+            )
+            labels = kmeans.fit_predict(X)
             
-            # Calculate silhouette score
-            if len(np.unique(kmeans.labels_)) > 1:
-                sil_score = silhouette_score(X, kmeans.labels_)
-                silhouette_scores.append(sil_score)
+            if len(np.unique(labels)) > 1:
+                score = silhouette_score(X, labels)
+                silhouette_scores.append(score)
+                logger.debug(f"  K={k}, Silhouette={score:.4f}")
             else:
-                silhouette_scores.append(0)
+                silhouette_scores.append(-1)
+                logger.debug(f"  K={k}, Invalid clustering")
         
-        # Find elbow point
-        wcss_diff = np.diff(wcss)
-        wcss_diff_diff = np.diff(wcss_diff)
-        elbow_point = np.argmax(wcss_diff_diff) + 3  # +3 due to double diff
-        
-        # Find best silhouette score
-        best_silhouette = np.argmax(silhouette_scores) + 2
-        
-        # Choose optimal K (prioritize silhouette)
-        self.optimal_k = best_silhouette
-        
-        self.scores['wcss'] = wcss
-        self.scores['silhouette_scores'] = silhouette_scores
-        self.scores['elbow_point'] = elbow_point
-        self.scores['best_silhouette'] = best_silhouette
+        # Find best K
+        best_idx = np.argmax(silhouette_scores)
+        self.optimal_k = self.n_clusters_range[best_idx]
+        logger.info(f"Optimal K = {self.optimal_k} (Silhouette: {silhouette_scores[best_idx]:.4f})")
         
         return self.optimal_k
     
     def fit_predict(self, X):
-        """Fit K-Means and predict clusters"""
-        # Find optimal K if not already found
-        if self.optimal_k is None:
-            self.find_optimal_k(X)
+        """
+        Fit K-Means and predict clusters
         
-        # Train model with optimal K
+        Args:
+            X: Feature matrix
+            
+        Returns:
+            dict: Results with labels and cluster information
+        """
+        logger.info("Fitting K-Means clustering")
+        
+        # Find optimal K
+        self.find_optimal_k(X)
+        
+        # Train final model
         self.model = KMeans(
             n_clusters=self.optimal_k,
             random_state=self.random_state,
-            n_init=20,
-            max_iter=300
+            n_init=self.n_init
         )
         
-        labels = self.model.fit_predict(X)
+        self.labels = self.model.fit_predict(X)
         
-        return labels, self.optimal_k
+        # Calculate cluster sizes
+        unique, counts = np.unique(self.labels, return_counts=True)
+        cluster_sizes = dict(zip(unique.astype(str), counts.tolist()))
+        
+        results = {
+            'labels': self.labels,
+            'n_clusters': self.optimal_k,
+            'model': self.model,
+            'cluster_sizes': cluster_sizes,
+            'inertia': self.model.inertia_
+        }
+        
+        logger.info(f"K-Means completed: {self.optimal_k} clusters")
+        
+        return results
     
     def get_cluster_centers(self):
         """Get cluster centers"""
-        if self.model is not None:
+        if self.model:
             return self.model.cluster_centers_
         return None
     
-    def get_model_params(self):
-        """Get model parameters"""
-        return {
-            'n_clusters': self.optimal_k,
-            'inertia': self.model.inertia_ if self.model else None,
-            'scores': self.scores
-        }
+    def predict(self, X):
+        """Predict clusters for new data"""
+        if self.model:
+            return self.model.predict(X)
+        return None

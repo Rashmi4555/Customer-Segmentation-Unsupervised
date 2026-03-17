@@ -1,0 +1,12 @@
+2026-02-19 11:38:46,506 - __main__ - INFO - Starting Customer Segmentation System
+2026-02-19 11:38:57,771 - src.clustering.kmeans - INFO - Fitting K-Means clustering
+2026-02-19 11:38:57,771 - src.clustering.kmeans - INFO - Finding optimal number of clusters
+2026-02-19 11:39:05,153 - src.clustering.kmeans - INFO - Optimal K = 3 (Silhouette: 0.6420)
+2026-02-19 11:39:05,212 - src.clustering.kmeans - INFO - K-Means completed: 3 clusters
+2026-02-19 11:39:05,212 - src.clustering.hierarchical - INFO - Fitting hierarchical clustering
+2026-02-19 11:39:05,212 - src.clustering.hierarchical - INFO - Finding optimal number of clusters
+2026-02-19 11:39:17,540 - src.clustering.hierarchical - INFO - Optimal K = 2 (Silhouette: 0.6550)
+2026-02-19 11:39:18,342 - src.clustering.hierarchical - INFO - Hierarchical clustering completed: 2 clusters
+2026-02-19 11:39:18,342 - src.clustering.dbscan - INFO - Fitting DBSCAN clustering
+2026-02-19 11:39:18,342 - src.clustering.dbscan - INFO - Finding optimal DBSCAN parameters
+2026-02-19 11:39:18,357 - __main__ - ERROR - Error in main execution: 'eps_range'

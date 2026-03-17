@@ -1,0 +1,2 @@
+2026-02-18 12:17:54,162 - __main__ - INFO - Starting Customer Segmentation System
+2026-02-18 12:17:54,198 - __main__ - ERROR - Error in main execution: DataPreprocessor.__init__() takes 1 positional argument but 2 were given

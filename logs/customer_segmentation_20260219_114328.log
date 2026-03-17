@@ -1,0 +1,28 @@
+2026-02-19 11:43:28,068 - __main__ - INFO - Starting Customer Segmentation System
+2026-02-19 11:43:38,892 - src.clustering.kmeans - INFO - Fitting K-Means clustering
+2026-02-19 11:43:38,892 - src.clustering.kmeans - INFO - Finding optimal number of clusters
+2026-02-19 11:43:46,589 - src.clustering.kmeans - INFO - Optimal K = 3 (Silhouette: 0.6420)
+2026-02-19 11:43:46,637 - src.clustering.kmeans - INFO - K-Means completed: 3 clusters
+2026-02-19 11:43:46,637 - src.clustering.hierarchical - INFO - Fitting hierarchical clustering
+2026-02-19 11:43:46,637 - src.clustering.hierarchical - INFO - Finding optimal number of clusters
+2026-02-19 11:43:59,414 - src.clustering.hierarchical - INFO - Optimal K = 2 (Silhouette: 0.6550)
+2026-02-19 11:44:00,280 - src.clustering.hierarchical - INFO - Hierarchical clustering completed: 2 clusters
+2026-02-19 11:44:00,280 - src.clustering.dbscan - INFO - Fitting DBSCAN clustering
+2026-02-19 11:44:00,280 - src.clustering.dbscan - INFO - Finding optimal DBSCAN parameters
+2026-02-19 11:44:07,984 - src.clustering.dbscan - WARNING - No valid parameters found. Using defaults.
+2026-02-19 11:44:07,984 - src.clustering.dbscan - INFO - Optimal parameters: {'eps': 0.5, 'min_samples': 5}
+2026-02-19 11:44:08,674 - src.clustering.dbscan - INFO - DBSCAN complete. Found 0 clusters, 5878 noise points (100.0%)
+2026-02-19 11:44:08,674 - src.clustering.gmm - INFO - Fitting Gaussian Mixture Model
+2026-02-19 11:44:08,674 - src.clustering.gmm - INFO - Finding optimal number of components for GMM
+2026-02-19 11:44:10,502 - src.clustering.gmm - INFO - Components=2: BIC=971287.72, AIC=969477.72, Silhouette=0.237
+2026-02-19 11:44:12,342 - src.clustering.gmm - INFO - Components=3: BIC=949000.93, AIC=946282.59, Silhouette=-0.011
+2026-02-19 11:44:15,526 - src.clustering.gmm - INFO - Components=4: BIC=901929.98, AIC=898303.30, Silhouette=-0.096
+2026-02-19 11:44:20,322 - src.clustering.gmm - INFO - Components=5: BIC=894560.75, AIC=890025.73, Silhouette=-0.105
+2026-02-19 11:44:28,314 - src.clustering.gmm - INFO - Components=6: BIC=807807.85, AIC=802364.49, Silhouette=-0.185
+2026-02-19 11:44:35,646 - src.clustering.gmm - INFO - Components=7: BIC=805877.67, AIC=799525.97, Silhouette=-0.206
+2026-02-19 11:44:49,506 - src.clustering.gmm - INFO - Components=8: BIC=797601.81, AIC=790341.77, Silhouette=-0.226
+2026-02-19 11:45:02,767 - src.clustering.gmm - INFO - Components=9: BIC=792406.59, AIC=784238.21, Silhouette=-0.268
+2026-02-19 11:45:16,262 - src.clustering.gmm - INFO - Components=10: BIC=791065.95, AIC=781989.23, Silhouette=-0.233
+2026-02-19 11:45:16,262 - src.clustering.gmm - INFO - Optimal components selected: 2
+2026-02-19 11:45:18,087 - src.clustering.gmm - INFO - GMM complete. Found 2 components
+2026-02-19 11:45:18,087 - __main__ - ERROR - Error in main execution: 'n_clusters'

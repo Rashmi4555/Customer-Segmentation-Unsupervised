@@ -4,118 +4,126 @@ Data preprocessing module for customer segmentation
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from pathlib import Path
 import warnings
 warnings.filterwarnings('ignore')
 
 class DataPreprocessor:
     """Handles all data preprocessing steps"""
     
-    def __init__(self):
+    def __init__(self, config=None):
+        """
+        Initialize DataPreprocessor with optional configuration
+        
+        Args:
+            config (dict, optional): Configuration dictionary
+        """
+        self.config = config if config else {}
         self.report_data = {}
     
     def load_data(self, filepath):
         """Load dataset from CSV file"""
-        print(f"Loading data from {filepath}")
+        print(f"  Loading data from {filepath}")
         try:
+            # Check if file exists
+            if not Path(filepath).exists():
+                raise FileNotFoundError(f"File not found: {filepath}")
+            
             df = pd.read_csv(filepath, encoding='latin1')
-            print(f"✓ Loaded {len(df):,} records")
+            print(f"  ✓ Loaded {len(df):,} records")
             return df
         except Exception as e:
-            print(f"✗ Error loading data: {e}")
+            print(f"  ✗ Error loading data: {e}")
             raise
     
-    def clean_data(self, df):
-        """Apply comprehensive data cleaning"""
-        print("Cleaning data...")
+    def process_data(self, df):
+        """Main preprocessing pipeline"""
+        print("  Processing data...")
         original_shape = df.shape
         
-        # Create a copy
-        df_clean = df.copy()
+        # Make a copy
+        df_processed = df.copy()
+        
+        # Standardize column names (remove spaces)
+        df_processed.columns = df_processed.columns.str.strip()
+        
+        # Find customer column
+        customer_col = None
+        possible_customer = ['CustomerID', 'CustomerId', 'Customer ID', 'Customer', 'Customer_No']
+        for col in possible_customer:
+            if col in df_processed.columns:
+                customer_col = col
+                break
+        
+        if customer_col is None:
+            print("  ⚠️ No customer column found! Using first column as ID")
+            customer_col = df_processed.columns[0]
         
         # 1. Handle missing values
-        missing_customers = df_clean['CustomerID'].isnull().sum()
-        df_clean = df_clean.dropna(subset=['CustomerID'])
-        print(f"  Removed {missing_customers:,} records with missing CustomerID")
+        missing_before = df_processed[customer_col].isnull().sum()
+        df_processed = df_processed.dropna(subset=[customer_col])
+        print(f"  ✓ Removed {missing_before:,} records with missing customer ID")
         
-        # 2. Remove cancelled transactions
-        cancelled_mask = df_clean['InvoiceNo'].astype(str).str.startswith('C')
-        cancelled_count = cancelled_mask.sum()
-        df_clean = df_clean[~cancelled_mask]
-        print(f"  Removed {cancelled_count:,} cancelled transactions")
+        # 2. Find invoice column
+        invoice_col = None
+        possible_invoice = ['InvoiceNo', 'Invoice', 'InvoiceNumber', 'Invoice_No']
+        for col in possible_invoice:
+            if col in df_processed.columns:
+                invoice_col = col
+                break
         
-        # 3. Remove invalid quantities and prices
-        invalid_qty = (df_clean['Quantity'] <= 0).sum()
-        invalid_price = (df_clean['UnitPrice'] <= 0).sum()
-        df_clean = df_clean[df_clean['Quantity'] > 0]
-        df_clean = df_clean[df_clean['UnitPrice'] > 0]
-        print(f"  Removed {invalid_qty:,} invalid quantities")
-        print(f"  Removed {invalid_price:,} invalid prices")
+        # Remove cancelled transactions if invoice column exists
+        if invoice_col:
+            cancelled_mask = df_processed[invoice_col].astype(str).str.startswith('C')
+            cancelled_count = cancelled_mask.sum()
+            df_processed = df_processed[~cancelled_mask]
+            print(f"  ✓ Removed {cancelled_count:,} cancelled transactions")
         
-        # 4. Convert date column
-        df_clean['InvoiceDate'] = pd.to_datetime(df_clean['InvoiceDate'])
+        # 3. Remove invalid quantities
+        if 'Quantity' in df_processed.columns:
+            invalid_qty = (df_processed['Quantity'] <= 0).sum()
+            df_processed = df_processed[df_processed['Quantity'] > 0]
+            print(f"  ✓ Removed {invalid_qty:,} invalid quantities")
         
-        # 5. Create total value column
-        df_clean['TotalValue'] = df_clean['Quantity'] * df_clean['UnitPrice']
+        # 4. Remove invalid prices
+        price_col = None
+        if 'UnitPrice' in df_processed.columns:
+            price_col = 'UnitPrice'
+        elif 'Price' in df_processed.columns:
+            price_col = 'Price'
         
-        # 6. Handle outliers using IQR method
-        df_clean = self._handle_outliers(df_clean)
+        if price_col:
+            invalid_price = (df_processed[price_col] <= 0).sum()
+            df_processed = df_processed[df_processed[price_col] > 0]
+            print(f"  ✓ Removed {invalid_price:,} invalid prices")
         
-        # 7. Basic validation
-        df_clean = self._validate_data(df_clean)
+        # 5. Convert date column
+        date_col = None
+        if 'InvoiceDate' in df_processed.columns:
+            date_col = 'InvoiceDate'
+        elif 'Date' in df_processed.columns:
+            date_col = 'Date'
         
-        final_shape = df_clean.shape
-        print(f"\n✓ Cleaning complete:")
-        print(f"  Original: {original_shape[0]:,} records")
-        print(f"  Final: {final_shape[0]:,} records")
-        print(f"  Removed: {original_shape[0] - final_shape[0]:,} records ({((original_shape[0] - final_shape[0])/original_shape[0]*100):.1f}%)")
+        if date_col:
+            df_processed[date_col] = pd.to_datetime(df_processed[date_col])
         
-        # Store report data
-        self.report_data['cleaning_stats'] = {
-            'original_records': original_shape[0],
-            'final_records': final_shape[0],
-            'removed_records': original_shape[0] - final_shape[0],
-            'removed_percentage': ((original_shape[0] - final_shape[0])/original_shape[0]*100)
-        }
+        # 6. Create TotalValue column if needed
+        if 'TotalValue' not in df_processed.columns:
+            if 'Quantity' in df_processed.columns and price_col:
+                df_processed['TotalValue'] = df_processed['Quantity'] * df_processed[price_col]
+                print(f"  ✓ Created TotalValue column")
         
-        return df_clean
-    
-    def _handle_outliers(self, df):
-        """Cap outliers using IQR method"""
-        numeric_cols = ['Quantity', 'UnitPrice', 'TotalValue']
+        final_shape = df_processed.shape
+        removed = original_shape[0] - final_shape[0]
+        removed_pct = (removed / original_shape[0]) * 100 if original_shape[0] > 0 else 0
         
-        for col in numeric_cols:
-            if col in df.columns:
-                Q1 = df[col].quantile(0.25)
-                Q3 = df[col].quantile(0.75)
-                IQR = Q3 - Q1
-                lower_bound = Q1 - 1.5 * IQR
-                upper_bound = Q3 + 1.5 * IQR
-                
-                # Cap outliers
-                df[col] = np.where(df[col] < lower_bound, lower_bound, df[col])
-                df[col] = np.where(df[col] > upper_bound, upper_bound, df[col])
-                
-                outliers = ((df[col] < lower_bound) | (df[col] > upper_bound)).sum()
-                if outliers > 0:
-                    print(f"  Capped {outliers:,} outliers in {col}")
+        print(f"\n  ✓ Preprocessing complete:")
+        print(f"    Original: {original_shape[0]:,} records")
+        print(f"    Final: {final_shape[0]:,} records")
+        print(f"    Removed: {removed:,} records ({removed_pct:.1f}%)")
         
-        return df
-    
-    def _validate_data(self, df):
-        """Validate cleaned data"""
-        # Check for negative values
-        negative_qty = (df['Quantity'] < 0).sum()
-        negative_price = (df['UnitPrice'] < 0).sum()
-        
-        if negative_qty > 0 or negative_price > 0:
-            print(f"  ⚠️ Found {negative_qty} negative quantities and {negative_price} negative prices")
-        
-        # Check date range
-        date_range = df['InvoiceDate'].max() - df['InvoiceDate'].min()
-        print(f"  Time span: {date_range.days} days")
-        
-        return df
+        return df_processed
     
     def get_summary(self):
-        """Get cleaning summary"""
+        """Get preprocessing summary"""
         return self.report_data

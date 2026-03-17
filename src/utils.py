@@ -1,289 +1,268 @@
 """
 Utility functions for the customer segmentation project
 """
-import os
+
+import yaml
 import json
+import pickle
+import logging
+import os
+from pathlib import Path
+from datetime import datetime
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from datetime import datetime
-from sklearn.decomposition import PCA
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+from typing import Any, Dict, List, Optional
 import warnings
 warnings.filterwarnings('ignore')
 
-def save_results(data, filepath):
-    """Save results to JSON file"""
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+def setup_logging(log_level=logging.INFO):
+    """Setup logging configuration with automatic directory creation"""
+    # Create logs directory if it doesn't exist
+    log_dir = Path('logs')
+    log_dir.mkdir(parents=True, exist_ok=True)
     
-    # Convert numpy types to Python types
-    def convert_types(obj):
-        if isinstance(obj, np.integer):
-            return int(obj)
-        elif isinstance(obj, np.floating):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, dict):
-            return {k: convert_types(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [convert_types(item) for item in obj]
-        else:
-            return obj
+    # Create log filename
+    log_filename = log_dir / f'customer_segmentation_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
     
-    data = convert_types(data)
-    
-    with open(filepath, 'w') as f:
-        json.dump(data, f, indent=2)
-    
-    print(f"✓ Results saved to {filepath}")
-
-def create_visualizations(X_pca, labels, customer_features, algorithm_name):
-    """Create comprehensive visualizations"""
-    print(f"Creating visualizations for {algorithm_name}...")
-    
-    # 1. 2D Scatter Plot
-    plt.figure(figsize=(12, 8))
-    scatter = plt.scatter(X_pca[:, 0], X_pca[:, 1], c=labels, cmap='tab20', 
-                         alpha=0.7, s=50, edgecolor='k', linewidth=0.5)
-    plt.colorbar(scatter, label='Cluster')
-    plt.xlabel('PCA Component 1')
-    plt.ylabel('PCA Component 2')
-    plt.title(f'Customer Segments - {algorithm_name}')
-    plt.grid(True, alpha=0.3)
-    plt.savefig(f'results/cluster_plots/{algorithm_name}_2d.png', dpi=150, bbox_inches='tight')
-    plt.close()
-    
-    # 2. 3D Plot (if enough dimensions)
-    if X_pca.shape[1] >= 3:
-        fig = plt.figure(figsize=(14, 10))
-        ax = fig.add_subplot(111, projection='3d')
-        scatter_3d = ax.scatter(X_pca[:, 0], X_pca[:, 1], X_pca[:, 2], 
-                               c=labels, cmap='tab20', alpha=0.7, s=50)
-        ax.set_xlabel('PCA Component 1')
-        ax.set_ylabel('PCA Component 2')
-        ax.set_zlabel('PCA Component 3')
-        ax.set_title(f'Customer Segments - {algorithm_name} (3D)')
-        plt.colorbar(scatter_3d, ax=ax, label='Cluster')
-        plt.savefig(f'results/cluster_plots/{algorithm_name}_3d.png', dpi=150, bbox_inches='tight')
-        plt.close()
-    
-    # 3. Cluster Size Distribution
-    plt.figure(figsize=(10, 6))
-    unique_labels, counts = np.unique(labels, return_counts=True)
-    colors = plt.cm.tab20(np.linspace(0, 1, len(unique_labels)))
-    
-    bars = plt.bar(range(len(unique_labels)), counts, color=colors, edgecolor='black')
-    plt.xlabel('Cluster')
-    plt.ylabel('Number of Customers')
-    plt.title(f'Cluster Size Distribution - {algorithm_name}')
-    plt.xticks(range(len(unique_labels)), unique_labels)
-    
-    # Add count labels on bars
-    for bar, count in zip(bars, counts):
-        height = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width()/2., height,
-                f'{count}\n({count/len(labels)*100:.1f}%)',
-                ha='center', va='bottom')
-    
-    plt.grid(True, alpha=0.3, axis='y')
-    plt.savefig(f'results/cluster_plots/{algorithm_name}_distribution.png', dpi=150, bbox_inches='tight')
-    plt.close()
-    
-    # 4. Interactive Plotly visualization
-    if X_pca.shape[1] >= 2:
-        plot_df = pd.DataFrame({
-            'PC1': X_pca[:, 0],
-            'PC2': X_pca[:, 1],
-            'Cluster': labels,
-            'CustomerID': customer_features['CustomerID'].values[:len(X_pca)] if 'CustomerID' in customer_features.columns else range(len(X_pca))
-        })
-        
-        if X_pca.shape[1] >= 3:
-            plot_df['PC3'] = X_pca[:, 2]
-            
-            fig = px.scatter_3d(plot_df, x='PC1', y='PC2', z='PC3',
-                               color='Cluster', hover_data=['CustomerID'],
-                               title=f'Customer Segments - {algorithm_name}',
-                               color_continuous_scale='viridis')
-        else:
-            fig = px.scatter(plot_df, x='PC1', y='PC2', color='Cluster',
-                            hover_data=['CustomerID'],
-                            title=f'Customer Segments - {algorithm_name}')
-        
-        fig.write_html(f'results/cluster_plots/{algorithm_name}_interactive.html')
-    
-    print(f"✓ Visualizations saved to results/cluster_plots/")
-
-def analyze_cluster_profiles(customer_features, labels, algorithm_name):
-    """Analyze and profile each cluster"""
-    print(f"Analyzing cluster profiles for {algorithm_name}...")
-    
-    # Add cluster labels to customer data
-    profile_data = customer_features.copy()
-    profile_data['Cluster'] = labels[:len(profile_data)]
-    
-    # Calculate cluster statistics
-    cluster_profiles = {}
-    
-    for cluster_id in np.unique(labels):
-        if cluster_id == -1:  # Skip noise
-            continue
-            
-        cluster_data = profile_data[profile_data['Cluster'] == cluster_id]
-        
-        profile = {
-            'size': len(cluster_data),
-            'percentage': len(cluster_data) / len(profile_data) * 100,
-            'demographics': {},
-            'behavior': {},
-            'spending': {},
-            'rfm': {}
-        }
-        
-        # Demographic features
-        if 'Country' in cluster_data.columns:
-            profile['demographics']['top_country'] = cluster_data['Country'].mode().iloc[0] if not cluster_data['Country'].mode().empty else 'Unknown'
-        
-        # Behavioral features
-        behavioral_features = ['MonthlyFrequency', 'AvgDaysBetweenPurchases', 
-                              'ProductVarietyRatio', 'CustomerLifetimeMonths']
-        
-        for feature in behavioral_features:
-            if feature in cluster_data.columns:
-                profile['behavior'][feature] = {
-                    'mean': cluster_data[feature].mean(),
-                    'std': cluster_data[feature].std(),
-                    'median': cluster_data[feature].median()
-                }
-        
-        # Spending features
-        spending_features = ['Monetary', 'AvgTransactionValue', 'ValuePerTransaction']
-        
-        for feature in spending_features:
-            if feature in cluster_data.columns:
-                profile['spending'][feature] = {
-                    'mean': cluster_data[feature].mean(),
-                    'total': cluster_data[feature].sum() if feature == 'Monetary' else None
-                }
-        
-        # RFM features
-        rfm_features = ['Recency', 'Frequency', 'Monetary', 'RFM_Score']
-        
-        for feature in rfm_features:
-            if feature in cluster_data.columns:
-                profile['rfm'][feature] = cluster_data[feature].mean()
-        
-        cluster_profiles[cluster_id] = profile
-    
-    # Save profiles
-    save_results(cluster_profiles, f'results/metrics/{algorithm_name}_profiles.json')
-    
-    # Create summary table
-    summary_data = []
-    for cluster_id, profile in cluster_profiles.items():
-        summary_data.append({
-            'Cluster': cluster_id,
-            'Size': profile['size'],
-            'Percentage': f"{profile['percentage']:.1f}%",
-            'Avg Monetary': f"£{profile['spending'].get('Monetary', {}).get('mean', 0):,.0f}",
-            'Avg Frequency': f"{profile['rfm'].get('Frequency', 0):.1f}",
-            'Avg Recency': f"{profile['rfm'].get('Recency', 0):.0f} days",
-            'RFM Score': f"{profile['rfm'].get('RFM_Score', 0):.1f}"
-        })
-    
-    summary_df = pd.DataFrame(summary_data)
-    summary_df.to_csv(f'results/metrics/{algorithm_name}_summary.csv', index=False)
-    
-    print(f"✓ Cluster profiles saved to results/metrics/")
-    
-    return cluster_profiles, summary_df
-
-def generate_business_insights(cluster_profiles):
-    """Generate business insights from cluster profiles"""
-    insights = {
-        'revenue_generation': {},
-        'customer_retention': {},
-        'marketing_recommendations': {},
-        'segment_definitions': {}
-    }
-    
-    # Find highest revenue cluster
-    revenue_by_cluster = {}
-    for cluster_id, profile in cluster_profiles.items():
-        if 'Monetary' in profile['spending']:
-            revenue = profile['spending']['Monetary']['mean'] * profile['size']
-            revenue_by_cluster[cluster_id] = revenue
-    
-    if revenue_by_cluster:
-        max_revenue_cluster = max(revenue_by_cluster, key=revenue_by_cluster.get)
-        insights['revenue_generation']['highest_value_segment'] = {
-            'cluster': int(max_revenue_cluster),
-            'estimated_revenue': f"£{revenue_by_cluster[max_revenue_cluster]:,.0f}",
-            'percentage_of_total': f"{(revenue_by_cluster[max_revenue_cluster] / sum(revenue_by_cluster.values()) * 100):.1f}%"
-        }
-    
-    # Identify at-risk customers (high recency, low frequency)
-    at_risk_clusters = []
-    for cluster_id, profile in cluster_profiles.items():
-        recency = profile['rfm'].get('Recency', 0)
-        frequency = profile['rfm'].get('Frequency', 0)
-        monetary = profile['rfm'].get('Monetary', {}).get('mean', 0)
-        
-        if recency > 180 and frequency < 2:  # Not purchased in 6+ months, few purchases
-            at_risk_clusters.append({
-                'cluster': cluster_id,
-                'recency_days': recency,
-                'frequency': frequency,
-                'monetary_value': monetary
-            })
-    
-    insights['customer_retention']['at_risk_segments'] = at_risk_clusters
-    
-    # Define customer segments
-    for cluster_id, profile in cluster_profiles.items():
-        recency = profile['rfm'].get('Recency', 0)
-        frequency = profile['rfm'].get('Frequency', 0)
-        monetary = profile['rfm'].get('Monetary', {}).get('mean', 0)
-        
-        if monetary > 1000 and frequency > 10:
-            segment_type = "High-Value Loyalists"
-            strategy = "Premium offers, loyalty rewards, exclusive access"
-        elif monetary > 500 and frequency > 5:
-            segment_type = "Regular Spenders"
-            strategy = "Volume discounts, subscription models"
-        elif recency > 90 and monetary > 0:
-            segment_type = "At-Risk Customers"
-            strategy = "Re-engagement campaigns, win-back offers"
-        elif frequency > 3 and monetary < 100:
-            segment_type = "Budget Shoppers"
-            strategy = "Value bundles, budget-friendly promotions"
-        else:
-            segment_type = "Occasional Buyers"
-            strategy = "Awareness campaigns, introductory offers"
-        
-        insights['segment_definitions'][f"Cluster_{cluster_id}"] = {
-            'type': segment_type,
-            'characteristics': {
-                'size': profile['size'],
-                'avg_spend': monetary,
-                'purchase_frequency': frequency,
-                'recency_days': recency
-            },
-            'recommended_strategy': strategy
-        }
-    
-    # Marketing recommendations
-    insights['marketing_recommendations'] = {
-        'premium_targeting': insights['revenue_generation'].get('highest_value_segment', {}),
-        'retention_focus': at_risk_clusters[:3] if at_risk_clusters else [],
-        'growth_opportunities': [
-            cluster_id for cluster_id, profile in cluster_profiles.items()
-            if profile['rfm'].get('Frequency', 0) > 5 and profile['rfm'].get('Monetary', {}).get('mean', 0) < 500
+    # Setup logging
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_filename),
+            logging.StreamHandler()
         ]
+    )
+    
+    print(f"✅ Logging initialized. Log file: {log_filename}")
+
+def ensure_directories():
+    """Create all required directories for the project"""
+    directories = [
+        'data/raw',
+        'data/processed',
+        'logs',
+        'results',
+        'results/cluster_plots',
+        'results/pca_outputs',
+        'results/metrics',
+        'reports',
+        'models'
+    ]
+    
+    for directory in directories:
+        Path(directory).mkdir(parents=True, exist_ok=True)
+    
+    print("✅ All directories created/verified")
+    return True
+
+def load_config(config_path: str) -> Dict:
+    """Load configuration from YAML file with error handling"""
+    config_path = Path(config_path)
+    
+    # Check if file exists
+    if not config_path.exists():
+        print(f"⚠️ Config file {config_path} not found. Using default configuration.")
+        
+        # Return default configuration
+        return {
+            'data': {
+                'raw': 'data/raw/online_retail_II.csv',
+                'processed': 'data/processed/',
+                'cleaned': 'data/processed/cleaned_data.csv',
+                'features': 'data/processed/customer_features.csv'
+            },
+            'features': {
+                'rfm': ['recency', 'frequency', 'monetary'],
+                'behavioral': ['avg_transaction_value', 'unique_products', 'purchase_frequency'],
+                'derived': ['value_per_transaction', 'quantity_per_transaction']
+            },
+            'clustering': {
+                'kmeans': {'max_clusters': 10, 'random_state': 42},
+                'hierarchical': {'max_clusters': 10, 'linkage': 'ward'},
+                'dbscan': {'eps': 0.5, 'min_samples': 5},
+                'gmm': {'max_components': 10, 'covariance_type': 'full'}
+            },
+            'pca': {'n_components': 0.95},
+            'output': {
+                'results': 'results/',
+                'plots': 'results/cluster_plots/',
+                'pca': 'results/pca_outputs/',
+                'metrics': 'results/metrics/',
+                'logs': 'logs/'
+            },
+            'logging': {
+                'level': 'INFO',
+                'format': '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            }
+        }
+    
+    # Load existing config
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        print(f"✅ Loaded configuration from {config_path}")
+        return config
+    except Exception as e:
+        print(f"❌ Error loading config: {e}. Using defaults.")
+        return {}
+
+def save_config(config: Dict, config_path: str):
+    """Save configuration to YAML file"""
+    with open(config_path, 'w') as f:
+        yaml.dump(config, f, default_flow_style=False)
+
+def save_model(model: Any, model_path: str):
+    """Save trained model to file"""
+    Path(model_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(model_path, 'wb') as f:
+        pickle.dump(model, f)
+
+def load_model(model_path: str) -> Any:
+    """Load trained model from file"""
+    with open(model_path, 'rb') as f:
+        model = pickle.load(f)
+    return model
+
+def save_dataframe(df: pd.DataFrame, filepath: str, **kwargs):
+    """Save DataFrame to various formats"""
+    path = Path(filepath)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    
+    if path.suffix == '.csv':
+        df.to_csv(path, **kwargs)
+    elif path.suffix == '.parquet':
+        df.to_parquet(path, **kwargs)
+    elif path.suffix == '.pkl':
+        df.to_pickle(path, **kwargs)
+    else:
+        raise ValueError(f"Unsupported file format: {path.suffix}")
+
+def load_dataframe(filepath: str, **kwargs) -> pd.DataFrame:
+    """Load DataFrame from various formats"""
+    path = Path(filepath)
+    
+    if path.suffix == '.csv':
+        return pd.read_csv(path, **kwargs)
+    elif path.suffix == '.parquet':
+        return pd.read_parquet(path, **kwargs)
+    elif path.suffix == '.pkl':
+        return pd.read_pickle(path, **kwargs)
+    else:
+        raise ValueError(f"Unsupported file format: {path.suffix}")
+
+def create_directory_structure(base_path: str = '.'):
+    """Create project directory structure"""
+    directories = [
+        'data/raw',
+        'data/processed',
+        'notebooks',
+        'src/clustering',
+        'reports',
+        'results/cluster_plots',
+        'results/pca_outputs',
+        'results/metrics',
+        'logs',
+        'models'
+    ]
+    
+    for directory in directories:
+        Path(base_path, directory).mkdir(parents=True, exist_ok=True)
+    
+    print(f"Directory structure created at {base_path}")
+
+def calculate_statistics(df: pd.DataFrame, cluster_labels: np.ndarray) -> pd.DataFrame:
+    """Calculate statistics for each cluster"""
+    df_with_clusters = df.copy()
+    df_with_clusters['Cluster'] = cluster_labels
+    
+    # Group statistics
+    cluster_stats = df_with_clusters.groupby('Cluster').agg(['mean', 'std', 'count'])
+    
+    # Flatten multi-index columns
+    cluster_stats.columns = ['_'.join(col).strip() for col in cluster_stats.columns.values]
+    
+    return cluster_stats
+
+def detect_anomalies(df: pd.DataFrame, method: str = 'isolation_forest', **kwargs):
+    """Detect anomalies in data"""
+    from sklearn.ensemble import IsolationForest
+    from sklearn.neighbors import LocalOutlierFactor
+    
+    if method == 'isolation_forest':
+        clf = IsolationForest(**kwargs)
+        anomalies = clf.fit_predict(df)
+        return anomalies
+    
+    elif method == 'lof':
+        lof = LocalOutlierFactor(**kwargs)
+        anomalies = lof.fit_predict(df)
+        return anomalies
+    
+    else:
+        raise ValueError(f"Unknown anomaly detection method: {method}")
+
+def calculate_feature_importance(X: pd.DataFrame, labels: np.ndarray) -> pd.DataFrame:
+    """Calculate feature importance for clustering"""
+    from sklearn.ensemble import RandomForestClassifier
+    
+    # Use RandomForest to determine feature importance
+    rf = RandomForestClassifier(n_estimators=100, random_state=42)
+    rf.fit(X, labels)
+    
+    importance_df = pd.DataFrame({
+        'feature': X.columns,
+        'importance': rf.feature_importances_
+    }).sort_values('importance', ascending=False)
+    
+    return importance_df
+
+def generate_report(cluster_results: Dict, algorithm_name: str, output_dir: str = 'reports'):
+    """Generate a comprehensive report for clustering results"""
+    report = {
+        'algorithm': algorithm_name,
+        'timestamp': datetime.now().isoformat(),
+        'cluster_summary': {},
+        'metrics': {},
+        'business_insights': {}
     }
     
-    return insights
+    # Add cluster information
+    for key, value in cluster_results.items():
+        if isinstance(value, (int, float, str, bool, list, dict)):
+            report['cluster_summary'][key] = value
+    
+    # Save report
+    output_path = Path(output_dir) / f'{algorithm_name}_report_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_path, 'w') as f:
+        json.dump(report, f, indent=4, default=str)
+    
+    return output_path
+
+def validate_data(df: pd.DataFrame, required_columns: List[str] = None) -> bool:
+    """Validate input data"""
+    if df.empty:
+        raise ValueError("DataFrame is empty")
+    
+    if df.isnull().all().any():
+        raise ValueError("Some columns contain only null values")
+    
+    if required_columns:
+        missing_cols = [col for col in required_columns if col not in df.columns]
+        if missing_cols:
+            raise ValueError(f"Missing required columns: {missing_cols}")
+    
+    return True
+
+def memory_usage(df: pd.DataFrame) -> str:
+    """Calculate memory usage of DataFrame"""
+    memory = df.memory_usage(deep=True).sum()
+    
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if memory < 1024:
+            return f"{memory:.2f} {unit}"
+        memory /= 1024
+    
+    return f"{memory:.2f} TB" 

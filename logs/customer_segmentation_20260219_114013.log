@@ -1,0 +1,17 @@
+2026-02-19 11:40:13,882 - __main__ - INFO - Starting Customer Segmentation System
+2026-02-19 11:40:24,295 - src.clustering.kmeans - INFO - Fitting K-Means clustering
+2026-02-19 11:40:24,295 - src.clustering.kmeans - INFO - Finding optimal number of clusters
+2026-02-19 11:40:31,854 - src.clustering.kmeans - INFO - Optimal K = 3 (Silhouette: 0.6420)
+2026-02-19 11:40:31,914 - src.clustering.kmeans - INFO - K-Means completed: 3 clusters
+2026-02-19 11:40:31,914 - src.clustering.hierarchical - INFO - Fitting hierarchical clustering
+2026-02-19 11:40:31,914 - src.clustering.hierarchical - INFO - Finding optimal number of clusters
+2026-02-19 11:40:44,372 - src.clustering.hierarchical - INFO - Optimal K = 2 (Silhouette: 0.6550)
+2026-02-19 11:40:45,273 - src.clustering.hierarchical - INFO - Hierarchical clustering completed: 2 clusters
+2026-02-19 11:40:45,273 - src.clustering.dbscan - INFO - Fitting DBSCAN clustering
+2026-02-19 11:40:45,273 - src.clustering.dbscan - INFO - Finding optimal DBSCAN parameters
+2026-02-19 11:40:52,950 - src.clustering.dbscan - WARNING - No valid parameters found. Using defaults.
+2026-02-19 11:40:52,950 - src.clustering.dbscan - INFO - Optimal parameters: {'eps': 0.5, 'min_samples': 5}
+2026-02-19 11:40:55,420 - src.clustering.dbscan - INFO - DBSCAN complete. Found 0 clusters, 5878 noise points (100.0%)
+2026-02-19 11:40:55,420 - src.clustering.gmm - INFO - Fitting Gaussian Mixture Model
+2026-02-19 11:40:55,420 - src.clustering.gmm - INFO - Finding optimal number of components for GMM
+2026-02-19 11:40:55,420 - __main__ - ERROR - Error in main execution: 'n_components_range'

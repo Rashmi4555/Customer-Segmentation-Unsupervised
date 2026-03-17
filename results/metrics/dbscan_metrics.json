@@ -1,0 +1,12 @@
+{
+    "n_clusters": 0,
+    "silhouette": -1,
+    "davies_bouldin": Infinity,
+    "calinski_harabasz": 0,
+    "noise_percentage": 100.0,
+    "cluster_sizes": {
+        "-1": 5878
+    },
+    "timestamp": "2026-02-19T11:56:19.365152",
+    "algorithm": "dbscan"
+}

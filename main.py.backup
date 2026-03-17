@@ -1,0 +1,236 @@
+"""
+Main execution script for Customer Segmentation System with Visible Output
+"""
+
+import argparse
+import logging
+import sys
+from pathlib import Path
+
+# Add src to path
+sys.path.append(str(Path(__file__).parent))
+
+from src.data_preprocessing import DataPreprocessor
+from src.feature_engineering import FeatureEngineer
+from src.clustering.kmeans import KMeansClustering
+from src.clustering.hierarchical import HierarchicalClustering
+from src.clustering.dbscan import DBSCANClustering
+from src.clustering.gmm import GMMClustering
+from src.evaluation import ClusterEvaluator
+from src.utils import load_config, setup_logging, ensure_directories
+
+def print_header(text):
+    """Print a formatted header"""
+    print("\n" + "="*70)
+    print(f" {text}")
+    print("="*70)
+
+def print_success(text):
+    """Print success message"""
+    print(f"   ✅ {text}")
+
+def print_info(text):
+    """Print info message"""
+    print(f"   📌 {text}")
+
+def print_warning(text):
+    """Print warning message"""
+    print(f"   ⚠️ {text}")
+
+def main():
+    """Main execution function"""
+    parser = argparse.ArgumentParser(description='Customer Segmentation System')
+    parser.add_argument('--data', type=str, default='data/raw/online_retail_II.csv',
+                       help='Path to input data')
+    parser.add_argument('--algorithm', type=str, default='all',
+                       choices=['kmeans', 'hierarchical', 'dbscan', 'gmm', 'all'],
+                       help='Clustering algorithm to use')
+    parser.add_argument('--config', type=str, default='config.yaml',
+                       help='Path to configuration file')
+    
+    args = parser.parse_args()
+    
+    # Print welcome banner
+    print("\n" + "="*80)
+    print("🌟🌟 CUSTOMER SEGMENTATION SYSTEM - UNSUPERVISED LEARNING 🌟🌟")
+    print("="*80)
+    print(f"📊 Dataset: {args.data}")
+    print(f"🧠 Algorithm: {args.algorithm}")
+    print(f"⚙️ Config: {args.config}")
+    print("="*80)
+    
+    # Create necessary directories
+    print_header("[STEP 0] Setting up directories")
+    ensure_directories()
+    print_success("All directories created/verified")
+    
+    # Setup logging
+    setup_logging()
+    logger = logging.getLogger(__name__)
+    logger.info("Starting Customer Segmentation System")
+    
+    # Check if dataset exists
+    data_path = Path(args.data)
+    if not data_path.exists():
+        print_warning(f"Dataset not found at: {args.data}")
+        print("\n📁 Available datasets in data/raw/:")
+        raw_files = list(Path('data/raw').glob('*'))
+        if raw_files:
+            for f in raw_files:
+                size = f.stat().st_size / (1024*1024)
+                print(f"   • {f.name} ({size:.1f} MB)")
+        else:
+            print("   No files found in data/raw/")
+        print("\n💡 Please download the Online Retail II dataset from Kaggle")
+        print("   and place it in: data/raw/online_retail_II.csv")
+        return
+    
+    # Load configuration
+    print_header("[STEP 1] Loading Configuration")
+    config = load_config(args.config)
+    print_success(f"Configuration loaded")
+    
+    try:
+        # Step 1: Data Preprocessing
+        print_header("[STEP 2] Data Preprocessing")
+        print_info("Initializing DataPreprocessor...")
+        preprocessor = DataPreprocessor(config)
+        
+        print_info(f"Loading data from {args.data}...")
+        df = preprocessor.load_data(args.data)
+        print_success(f"Loaded {len(df):,} records")
+        
+        print_info("Processing data (cleaning, removing invalid entries)...")
+        df_processed = preprocessor.process_data(df)
+        print_success(f"Processing complete: {len(df_processed):,} records remaining")
+        
+        # Save processed data
+        processed_path = Path('data/processed/customers_processed.csv')
+        processed_path.parent.mkdir(parents=True, exist_ok=True)
+        df_processed.to_csv(processed_path, index=False)
+        print_success(f"Processed data saved to {processed_path}")
+        
+        # Step 2: Feature Engineering
+        print_header("[STEP 3] Feature Engineering")
+        print_info("Creating RFM features and behavioral metrics...")
+        engineer = FeatureEngineer(config)
+        df_features = engineer.create_features(df_processed)
+        print_success(f"Created {len(df_features.columns)} features for {len(df_features):,} customers")
+        
+        # Save features
+        features_path = Path('data/processed/customer_features.csv')
+        df_features.to_csv(features_path, index=False)
+        print_success(f"Features saved to {features_path}")
+        
+        # Step 3: Clustering
+        print_header("[STEP 4] Clustering Analysis")
+        
+        results = {}
+        
+        if args.algorithm in ['kmeans', 'all']:
+            print_info("Running K-Means Clustering...")
+            kmeans = KMeansClustering(config)
+            kmeans_results = kmeans.fit_predict(df_features)
+            results['kmeans'] = kmeans_results
+            print_success(f"K-Means completed: {kmeans_results['n_clusters']} clusters found")
+        
+        if args.algorithm in ['hierarchical', 'all']:
+            print_info("Running Hierarchical Clustering...")
+            hierarchical = HierarchicalClustering(config)
+            hierarchical_results = hierarchical.fit_predict(df_features)
+            results['hierarchical'] = hierarchical_results
+            print_success(f"Hierarchical completed: {hierarchical_results['n_clusters']} clusters found")
+        
+        if args.algorithm in ['dbscan', 'all']:
+            print_info("Running DBSCAN Clustering...")
+            dbscan = DBSCANClustering(config)
+            dbscan_results = dbscan.fit_predict(df_features)
+            results['dbscan'] = dbscan_results
+            n_clusters = dbscan_results['n_clusters']
+            noise = dbscan_results.get('noise_percentage', 0)
+            print_success(f"DBSCAN completed: {n_clusters} clusters found (noise: {noise:.1f}%)")
+        
+        if args.algorithm in ['gmm', 'all']:
+            print_info("Running Gaussian Mixture Model...")
+            gmm = GMMClustering(config)
+            gmm_results = gmm.fit_predict(df_features)
+            results['gmm'] = gmm_results
+            print_success(f"GMM completed: {gmm_results['n_clusters']} components found")
+        
+        # Step 4: Evaluation
+        print_header("[STEP 5] Cluster Evaluation")
+        evaluator = ClusterEvaluator(config)
+        
+        evaluation_results = {}
+        
+        for algo_name, algo_results in results.items():
+            print_info(f"Evaluating {algo_name}...")
+            
+            metrics = evaluator.evaluate(
+                df_features, 
+                algo_results['labels'],
+                algo_results.get('proba', None)
+            )
+            
+            evaluation_results[algo_name] = metrics
+            
+            print(f"      📈 Silhouette Score: {metrics['silhouette']:.4f}")
+            print(f"      📉 Davies-Bouldin: {metrics['davies_bouldin']:.4f}")
+            print(f"      📊 Calinski-Harabasz: {metrics['calinski_harabasz']:.0f}")
+            
+            # Save evaluation results
+            evaluator.save_results(metrics, algo_name)
+            print_success(f"{algo_name} evaluation saved")
+            
+            # Visualize clusters
+            print_info(f"Creating visualization for {algo_name}...")
+            evaluator.visualize_clusters(
+                df_features, 
+                algo_results['labels'],
+                algo_name
+            )
+            print_success(f"{algo_name} visualization saved")
+        
+        # Find best algorithm
+        if evaluation_results:
+            best_algo = max(evaluation_results.items(), 
+                          key=lambda x: x[1]['silhouette'])
+            
+            # Final summary
+            print("\n" + "🎉"*20)
+            print("🌟🌟 PROJECT COMPLETED SUCCESSFULLY! 🌟🌟")
+            print("🎉"*20)
+            print(f"\n🏆 BEST ALGORITHM: {best_algo[0].upper()}")
+            print(f"   • Number of Clusters: {best_algo[1]['n_clusters']}")
+            print(f"   • Silhouette Score: {best_algo[1]['silhouette']:.4f}")
+            print(f"   • Davies-Bouldin Index: {best_algo[1]['davies_bouldin']:.4f}")
+            
+            print(f"\n📁 RESULTS SAVED TO:")
+            print(f"   • Data: data/processed/")
+            print(f"   • Metrics: results/metrics/")
+            print(f"   • Visualizations: results/cluster_plots/")
+            print(f"   • Logs: logs/")
+            
+            # Show cluster distribution for best algorithm
+            best_labels = results[best_algo[0]]['labels']
+            unique, counts = np.unique(best_labels, return_counts=True)
+            print(f"\n📊 CLUSTER DISTRIBUTION:")
+            for cluster, count in zip(unique, counts):
+                if cluster != -1:  # Skip noise for DBSCAN
+                    percentage = (count / len(best_labels)) * 100
+                    print(f"   • Cluster {cluster}: {count} customers ({percentage:.1f}%)")
+            if -1 in unique:
+                noise_count = counts[unique == -1][0]
+                noise_pct = (noise_count / len(best_labels)) * 100
+                print(f"   • Noise points: {noise_count} ({noise_pct:.1f}%)")
+        
+        logger.info("Customer Segmentation System completed successfully")
+        
+    except Exception as e:
+        print(f"\n❌ ERROR: {e}")
+        logger.error(f"Error in main execution: {e}")
+        import traceback
+        traceback.print_exc()
+
+if __name__ == "__main__":
+    main()

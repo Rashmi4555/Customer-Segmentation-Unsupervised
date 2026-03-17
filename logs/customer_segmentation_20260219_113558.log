@@ -1,0 +1,7 @@
+2026-02-19 11:35:58,266 - __main__ - INFO - Starting Customer Segmentation System
+2026-02-19 11:36:10,224 - src.clustering.kmeans - INFO - Fitting K-Means clustering
+2026-02-19 11:36:10,224 - src.clustering.kmeans - INFO - Finding optimal number of clusters
+2026-02-19 11:36:18,843 - src.clustering.kmeans - INFO - Optimal K = 3 (Silhouette: 0.6420)
+2026-02-19 11:36:18,899 - src.clustering.kmeans - INFO - K-Means completed: 3 clusters
+2026-02-19 11:36:18,899 - src.clustering.hierarchical - INFO - Fitting hierarchical clustering
+2026-02-19 11:36:18,899 - __main__ - ERROR - Error in main execution: 'method'

@@ -1,0 +1,15 @@
+{
+    "n_clusters": 3,
+    "silhouette": 0.6419892415861577,
+    "davies_bouldin": 0.4342389255138179,
+    "calinski_harabasz": 28542.86823856234,
+    "noise_percentage": 0,
+    "cluster_sizes": {
+        "0": 1761,
+        "1": 2845,
+        "2": 1272
+    },
+    "separation": 3.1209510041460736e+16,
+    "timestamp": "2026-02-19T11:56:17.811173",
+    "algorithm": "kmeans"
+}

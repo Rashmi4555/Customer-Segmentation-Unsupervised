@@ -3,8 +3,8 @@ Feature engineering module for customer segmentation
 """
 import pandas as pd
 import numpy as np
-from datetime import datetime
-from sklearn.preprocessing import StandardScaler, LabelEncoder
+from datetime import datetime, timedelta
+from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 import warnings
 warnings.filterwarnings('ignore')
@@ -12,218 +12,239 @@ warnings.filterwarnings('ignore')
 class FeatureEngineer:
     """Creates customer-level features from transaction data"""
     
-    def __init__(self):
+    def __init__(self, config=None):
+        """
+        Initialize FeatureEngineer with optional configuration
+        
+        Args:
+            config (dict, optional): Configuration dictionary
+        """
+        self.config = config if config else {}
         self.scaler = StandardScaler()
-        self.label_encoders = {}
+        self.feature_names = []
     
-    def create_customer_features(self, df):
+    def create_features(self, df):
         """Create customer-level features from transaction data"""
-        print("\nCreating customer features...")
+        print("  Creating customer features...")
         
-        # Set reference date (day after last purchase)
-        reference_date = df['InvoiceDate'].max() + pd.Timedelta(days=1)
+        # Ensure we're working with a copy
+        df = df.copy()
         
-        # Group by customer
-        customer_data = df.groupby('CustomerID').agg({
-            'InvoiceDate': ['max', 'nunique'],
-            'TotalValue': ['sum', 'mean'],
-            'Quantity': ['sum', 'mean'],
-            'StockCode': 'nunique',
-            'InvoiceNo': 'nunique',
-            'Country': 'first'
-        }).reset_index()
+        # Identify key columns
+        customer_col = self._find_column(df, ['CustomerID', 'CustomerId', 'Customer ID', 'Customer'])
+        date_col = self._find_column(df, ['InvoiceDate', 'Date', 'TransactionDate'])
+        invoice_col = self._find_column(df, ['InvoiceNo', 'Invoice', 'InvoiceNumber'])
         
-        # Flatten column names
-        customer_data.columns = ['CustomerID', 'LastPurchaseDate', 'UniqueDates',
-                                'TotalSpent', 'AvgTransactionValue', 'TotalQuantity',
-                                'AvgQuantity', 'UniqueProducts', 'TransactionCount',
-                                'Country']
+        # Find value column
+        value_col = None
+        if 'TotalValue' in df.columns:
+            value_col = 'TotalValue'
+        elif 'Total' in df.columns:
+            value_col = 'Total'
+        elif 'Revenue' in df.columns:
+            value_col = 'Revenue'
         
-        # Calculate RFM metrics
-        customer_data = self._calculate_rfm(customer_data, reference_date)
+        if not value_col:
+            if 'Quantity' in df.columns and 'UnitPrice' in df.columns:
+                df['TotalValue'] = df['Quantity'] * df['UnitPrice']
+                value_col = 'TotalValue'
+                print("  ✓ Created TotalValue from Quantity × UnitPrice")
+            elif 'Quantity' in df.columns and 'Price' in df.columns:
+                df['TotalValue'] = df['Quantity'] * df['Price']
+                value_col = 'TotalValue'
+                print("  ✓ Created TotalValue from Quantity × Price")
         
-        # Calculate behavioral metrics
-        customer_data = self._calculate_behavioral_metrics(customer_data, df)
+        if not customer_col:
+            raise ValueError("No customer column found")
         
-        # Calculate derived ratios
-        customer_data = self._calculate_derived_ratios(customer_data)
+        if not value_col:
+            raise ValueError("No value column found and cannot create TotalValue")
         
-        # Encode categorical variables
-        customer_data = self._encode_categorical(customer_data)
-        
-        print(f"✓ Created features for {len(customer_data):,} customers")
-        print(f"  Features: {len(customer_data.columns)} columns")
-        
-        return customer_data
-    
-    def _calculate_rfm(self, customer_data, reference_date):
-        """Calculate Recency, Frequency, Monetary metrics"""
-        # Recency: Days since last purchase
-        customer_data['Recency'] = (reference_date - customer_data['LastPurchaseDate']).dt.days
-        
-        # Frequency: Number of transactions
-        customer_data['Frequency'] = customer_data['TransactionCount']
-        
-        # Monetary: Total amount spent
-        customer_data['Monetary'] = customer_data['TotalSpent']
-        
-        # RFM Scores (1-5 scale, 5 being best)
-        for metric in ['Recency', 'Frequency', 'Monetary']:
-            # For Recency, lower is better (more recent)
-            if metric == 'Recency':
-                customer_data[f'{metric}_Score'] = pd.qcut(
-                    customer_data[metric], 
-                    5, 
-                    labels=[5, 4, 3, 2, 1]
-                ).astype(int)
-            else:
-                customer_data[f'{metric}_Score'] = pd.qcut(
-                    customer_data[metric], 
-                    5, 
-                    labels=[1, 2, 3, 4, 5]
-                ).astype(int)
-        
-        # Combined RFM Score
-        customer_data['RFM_Score'] = (
-            customer_data['Recency_Score'] + 
-            customer_data['Frequency_Score'] + 
-            customer_data['Monetary_Score']
-        )
-        
-        # RFM Segment
-        customer_data['RFM_Segment'] = pd.cut(
-            customer_data['RFM_Score'],
-            bins=[0, 5, 8, 11, 15],
-            labels=['Low Value', 'Medium Value', 'High Value', 'Top Value']
-        )
-        
-        return customer_data
-    
-    def _calculate_behavioral_metrics(self, customer_data, df):
-        """Calculate behavioral patterns"""
-        
-        # Calculate purchase frequency (transactions per month)
-        customer_first_purchase = df.groupby('CustomerID')['InvoiceDate'].min().reset_index()
-        customer_first_purchase.columns = ['CustomerID', 'FirstPurchaseDate']
-        
-        # Merge first purchase date
-        customer_data = customer_data.merge(customer_first_purchase, on='CustomerID')
-        
-        # Calculate customer lifetime in months
-        customer_data['CustomerLifetimeMonths'] = (
-            (customer_data['LastPurchaseDate'] - customer_data['FirstPurchaseDate']).dt.days / 30
-        ).clip(lower=1)  # Minimum 1 month to avoid division by zero
-        
-        # Monthly frequency
-        customer_data['MonthlyFrequency'] = (
-            customer_data['Frequency'] / customer_data['CustomerLifetimeMonths']
-        )
-        
-        # Average days between purchases
-        if customer_data['Frequency'].max() > 1:
-            customer_data['AvgDaysBetweenPurchases'] = (
-                customer_data['Recency'] / (customer_data['Frequency'] - 1)
-            ).fillna(0)
+        # Set reference date
+        if date_col and date_col in df.columns:
+            snapshot_date = pd.to_datetime(df[date_col]).max() + timedelta(days=1)
         else:
-            customer_data['AvgDaysBetweenPurchases'] = 0
+            snapshot_date = datetime.now()
         
-        # Product variety ratio
-        customer_data['ProductVarietyRatio'] = (
-            customer_data['UniqueProducts'] / customer_data['TotalQuantity']
-        )
+        # Calculate RFM
+        if date_col and date_col in df.columns and invoice_col and invoice_col in df.columns:
+            # Full RFM calculation
+            rfm = df.groupby(customer_col).agg({
+                date_col: lambda x: (snapshot_date - pd.to_datetime(x).max()).days,
+                invoice_col: 'nunique',
+                value_col: 'sum'
+            }).reset_index()
+            rfm.columns = [customer_col, 'Recency', 'Frequency', 'Monetary']
+        elif date_col and date_col in df.columns:
+            # No invoice column
+            temp = df.groupby(customer_col).agg({
+                date_col: lambda x: (snapshot_date - pd.to_datetime(x).max()).days,
+                value_col: 'sum',
+                customer_col: 'count'
+            }).reset_index()
+            temp.columns = [customer_col, 'Recency', 'Monetary', 'Frequency']
+            rfm = temp[[customer_col, 'Recency', 'Frequency', 'Monetary']]
+        else:
+            # Minimal RFM
+            temp = df.groupby(customer_col).agg({
+                value_col: 'sum',
+                customer_col: 'count'
+            }).reset_index()
+            temp.columns = [customer_col, 'Monetary', 'Frequency']
+            temp['Recency'] = 0
+            rfm = temp[[customer_col, 'Recency', 'Frequency', 'Monetary']]
         
-        # Price sensitivity (inverse of average price)
-        customer_data['PriceSensitivity'] = (
-            customer_data['TotalQuantity'] / customer_data['TotalSpent']
-        )
+        # Ensure all RFM columns are numeric
+        rfm['Recency'] = pd.to_numeric(rfm['Recency'], errors='coerce').fillna(0)
+        rfm['Frequency'] = pd.to_numeric(rfm['Frequency'], errors='coerce').fillna(0)
+        rfm['Monetary'] = pd.to_numeric(rfm['Monetary'], errors='coerce').fillna(0)
         
-        return customer_data
+        # Create RFM scores
+        rfm = self._create_rfm_scores(rfm)
+        
+        # Add behavioral features
+        customer_features = self._add_behavioral_features(df, rfm, customer_col, date_col, value_col)
+        
+        # Final check: ensure ALL features are numeric
+        numeric_cols = customer_features.select_dtypes(include=[np.number]).columns.tolist()
+        non_numeric = [col for col in customer_features.columns if col not in numeric_cols and col != customer_col]
+        
+        if non_numeric:
+            print(f"  ⚠️ Converting non-numeric columns: {non_numeric}")
+            for col in non_numeric:
+                customer_features[col] = pd.to_numeric(customer_features[col], errors='coerce').fillna(0)
+        
+        print(f"  ✓ Created {len(customer_features.columns)} features for {len(customer_features)} customers")
+        print(f"  ✓ All features are now numeric")
+        
+        return customer_features
     
-    def _calculate_derived_ratios(self, customer_data):
-        """Calculate important derived ratios"""
+    def _find_column(self, df, possible_names):
+        """Find a column from possible names"""
+        for name in possible_names:
+            if name in df.columns:
+                return name
+        return None
+    
+    def _create_rfm_scores(self, rfm):
+        """Create RFM scores on 1-5 scale"""
+        try:
+            rfm['R_Score'] = pd.qcut(rfm['Recency'], 5, labels=[5,4,3,2,1]).astype(int)
+        except:
+            rfm['R_Score'] = pd.cut(rfm['Recency'].rank(pct=True),
+                                     bins=[0,0.2,0.4,0.6,0.8,1.0],
+                                     labels=[5,4,3,2,1]).astype(int)
         
-        # Value per transaction
-        customer_data['ValuePerTransaction'] = (
-            customer_data['Monetary'] / customer_data['Frequency']
-        )
+        try:
+            rfm['F_Score'] = pd.qcut(rfm['Frequency'].rank(method='first'), 5, labels=[1,2,3,4,5]).astype(int)
+        except:
+            rfm['F_Score'] = pd.cut(rfm['Frequency'].rank(pct=True),
+                                     bins=[0,0.2,0.4,0.6,0.8,1.0],
+                                     labels=[1,2,3,4,5]).astype(int)
         
-        # Quantity per transaction
-        customer_data['QuantityPerTransaction'] = (
-            customer_data['TotalQuantity'] / customer_data['Frequency']
-        )
+        try:
+            rfm['M_Score'] = pd.qcut(rfm['Monetary'].rank(method='first'), 5, labels=[1,2,3,4,5]).astype(int)
+        except:
+            rfm['M_Score'] = pd.cut(rfm['Monetary'].rank(pct=True),
+                                     bins=[0,0.2,0.4,0.6,0.8,1.0],
+                                     labels=[1,2,3,4,5]).astype(int)
         
-        # Customer activity ratio (recent purchases / total purchases)
-        customer_data['ActivityRatio'] = (
-            1 / (customer_data['Recency'] + 1) * customer_data['Frequency']
-        )
+        rfm['RFM_Score'] = rfm['R_Score'] + rfm['F_Score'] + rfm['M_Score']
+        return rfm
+    
+    def _add_behavioral_features(self, df, rfm, customer_col, date_col, value_col):
+        """Add behavioral features"""
+        # Average order value
+        avg_order = df.groupby(customer_col)[value_col].mean().reset_index()
+        avg_order.columns = [customer_col, 'AvgOrderValue']
         
-        # Spending consistency (CV of transaction values would require full history)
-        # For now, use frequency to monetary ratio
-        customer_data['SpendingConsistency'] = (
-            customer_data['Frequency'] / customer_data['Monetary']
-        )
+        # Merge
+        features = rfm.merge(avg_order, on=customer_col, how='left')
         
-        # Return all numeric columns for clustering
-        numeric_features = [
+        # Customer lifetime
+        if date_col and date_col in df.columns:
+            first_purchase = df.groupby(customer_col)[date_col].min().reset_index()
+            first_purchase.columns = [customer_col, 'FirstPurchase']
+            features = features.merge(first_purchase, on=customer_col, how='left')
+            
+            snapshot_date = pd.to_datetime(df[date_col]).max() + timedelta(days=1)
+            features['CustomerLifetime'] = (pd.to_datetime(snapshot_date) - 
+                                             pd.to_datetime(features['FirstPurchase'])).dt.days
+            features['CustomerLifetime'] = features['CustomerLifetime'].clip(lower=1)
+        else:
+            features['CustomerLifetime'] = 365
+        
+        # Derived features - ensure numeric
+        features['ValuePerDay'] = features['Monetary'] / features['CustomerLifetime']
+        features['AvgTransactionValue'] = features['Monetary'] / features['Frequency'].clip(lower=1)
+        features['PurchaseFrequency'] = features['Frequency'] / (features['CustomerLifetime'] / 30)
+        
+        # Product variety
+        product_col = self._find_column(df, ['StockCode', 'ProductCode', 'Product'])
+        if product_col:
+            product_var = df.groupby(customer_col)[product_col].nunique().reset_index()
+            product_var.columns = [customer_col, 'UniqueProducts']
+            features = features.merge(product_var, on=customer_col, how='left')
+        else:
+            features['UniqueProducts'] = 0
+        
+        # Convert all to numeric and handle infinities
+        numeric_cols = features.select_dtypes(include=[np.number]).columns
+        for col in numeric_cols:
+            features[col] = features[col].replace([np.inf, -np.inf], 0)
+            features[col] = features[col].fillna(0)
+        
+        # Convert any remaining object columns to numeric
+        for col in features.columns:
+            if col != customer_col and features[col].dtype == 'object':
+                try:
+                    features[col] = pd.to_numeric(features[col], errors='coerce').fillna(0)
+                except:
+                    pass
+        
+        return features
+    
+    def scale_features(self, df):
+        """Scale features for clustering"""
+        print("  Scaling features...")
+        
+        # Select numeric features for clustering
+        self.feature_names = [
             'Recency', 'Frequency', 'Monetary',
-            'MonthlyFrequency', 'AvgDaysBetweenPurchases',
-            'ProductVarietyRatio', 'PriceSensitivity',
-            'ValuePerTransaction', 'QuantityPerTransaction',
-            'ActivityRatio', 'CustomerLifetimeMonths'
+            'R_Score', 'F_Score', 'M_Score', 'RFM_Score',
+            'AvgOrderValue', 'ValuePerDay', 'AvgTransactionValue',
+            'CustomerLifetime', 'PurchaseFrequency', 'UniqueProducts'
         ]
         
         # Keep only columns that exist
-        numeric_features = [col for col in numeric_features if col in customer_data.columns]
+        self.feature_names = [col for col in self.feature_names if col in df.columns]
         
-        # Add RFM scores
-        numeric_features.extend(['Recency_Score', 'Frequency_Score', 'Monetary_Score', 'RFM_Score'])
+        # Extract features and ensure numeric
+        X = df[self.feature_names].copy()
         
-        # Store feature names
-        self.feature_names = numeric_features
+        # Double-check all are numeric
+        for col in X.columns:
+            X[col] = pd.to_numeric(X[col], errors='coerce').fillna(0)
         
-        return customer_data
-    
-    def _encode_categorical(self, customer_data):
-        """Encode categorical variables"""
-        if 'Country' in customer_data.columns:
-            le = LabelEncoder()
-            customer_data['Country_Encoded'] = le.fit_transform(customer_data['Country'])
-            self.label_encoders['Country'] = le
+        # Convert to numpy array with float dtype
+        X_array = X.values.astype(np.float64)
         
-        if 'RFM_Segment' in customer_data.columns:
-            le = LabelEncoder()
-            customer_data['RFM_Segment_Encoded'] = le.fit_transform(customer_data['RFM_Segment'])
-            self.label_encoders['RFM_Segment'] = le
+        # Scale
+        X_scaled = self.scaler.fit_transform(X_array)
         
-        return customer_data
-    
-    def scale_features(self, customer_data):
-        """Scale features for clustering"""
-        print("Scaling features...")
-        
-        # Get numeric features
-        if not hasattr(self, 'feature_names'):
-            self.feature_names = customer_data.select_dtypes(include=[np.number]).columns.tolist()
-        
-        # Remove CustomerID from features
-        self.feature_names = [col for col in self.feature_names if col not in ['CustomerID']]
-        
-        # Scale features
-        X = customer_data[self.feature_names].fillna(0)
-        X_scaled = self.scaler.fit_transform(X)
-        
-        print(f"✓ Scaled {X_scaled.shape[1]} features")
+        print(f"  ✓ Scaled {len(self.feature_names)} features")
+        print(f"  ✓ Feature matrix shape: {X_scaled.shape}")
         
         return X_scaled, self.scaler
     
     def apply_pca(self, X_scaled, n_components=0.95):
         """Apply PCA for dimensionality reduction"""
-        print(f"Applying PCA (variance: {n_components*100:.0f}%)...")
+        print("  Applying PCA...")
         
         pca = PCA(n_components=n_components)
         X_pca = pca.fit_transform(X_scaled)
         
-        print(f"✓ Reduced to {X_pca.shape[1]} components")
-        print(f"  Explained variance: {pca.explained_variance_ratio_.sum():.3f}")
+        print(f"  ✓ Reduced to {X_pca.shape[1]} components")
+        print(f"  ✓ Explained variance: {pca.explained_variance_ratio_.sum():.3f}")
         
         return X_pca, pca
