@@ -88,7 +88,7 @@ The main script performs:
 ![PCA](results/cluster_plots/pca_analysis.png)
 
 ### KMeans Clustering  
-![KMeans](results/cluster_plots/kmeans_clusters.png)
+![KMeans](results/cluster_plots/kmeans_optimization.png)
 
 ### Hierarchical Dendrogram  
 ![Dendrogram](results/cluster_plots/dendrogram.png)
