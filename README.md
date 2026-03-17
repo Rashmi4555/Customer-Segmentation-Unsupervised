@@ -82,7 +82,7 @@ The main script performs:
 ## 📊 Sample Visualizations
 
 ### Executive Dashboard  
-![Dashboard](results/cluster_plots/dashboard.png)
+![Dashboard](https://github.com/Rashmi4555/Customer-Segmentation-Unsupervised/blob/main/Screenshot%202026-03-16%20040738.png?raw=true)
 
 ### PCA Cluster Visualization  
 ![PCA](results/cluster_plots/pca_analysis.png)
